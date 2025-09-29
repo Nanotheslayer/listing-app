@@ -18,24 +18,19 @@
       await new Promise(resolve => setTimeout(resolve, 1000));
       statusMessage = "Аккаунты успешно загружены!";
       messageType = "success";
+      
+      // Автоматически скрыть сообщение через 3 секунды
+      setTimeout(() => {
+        statusMessage = "";
+      }, 3000);
     } catch (error) {
       statusMessage = `Ошибка загрузки: ${error}`;
       messageType = "error";
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function listAccount() {
-    loading = true;
-    statusMessage = "";
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      statusMessage = "Аккаунт выставлен на продажу!";
-      messageType = "success";
-    } catch (error) {
-      statusMessage = `Ошибка выставления: ${error}`;
-      messageType = "error";
+      
+      // Автоматически скрыть сообщение об ошибке через 3 секунды
+      setTimeout(() => {
+        statusMessage = "";
+      }, 3000);
     } finally {
       loading = false;
     }
@@ -44,75 +39,30 @@
 
 <main class="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-800">
   <div class="container mx-auto px-6 py-12">
-    <div class="text-center mb-16">
-      <div class="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-purple-600 to-blue-600 rounded-2xl shadow-2xl mb-6">
-        <span class="text-4xl">🎮</span>
-      </div>
-      <h1 class="text-6xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 bg-clip-text text-transparent">
+    <div class="max-w-6xl mx-auto mb-8 flex justify-end items-center gap-4">
+      <h1 class="text-4xl font-bold text-red-700">
         G2G Manager
       </h1>
-    </div>
-
-    <div class="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto mb-12">
-      <div class="group relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-8 border border-gray-700 hover:border-purple-500 transition-all duration-300 shadow-xl hover:shadow-purple-500/20 hover:-translate-y-1">
-        <div class="absolute inset-0 bg-gradient-to-br from-purple-600/10 to-transparent opacity-0 group-hover:opacity-100 rounded-2xl transition-opacity duration-300"></div>
-        <div class="relative">
-          <div class="flex items-center gap-4 mb-6">
-            <div class="w-14 h-14 bg-purple-500/20 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-              <span class="text-3xl">📥</span>
-            </div>
-            <h2 class="text-2xl font-bold text-white">Загрузить аккаунты</h2>
-          </div>
-          <button
-            onclick={loadAccounts}
-            disabled={loading}
-            class="w-full px-6 py-4 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-semibold rounded-xl hover:from-purple-500 hover:to-purple-600 active:scale-95 transition-all duration-200 shadow-lg hover:shadow-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-3"
-          >
-            {#if loading}
-              <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <span>Загрузка...</span>
-            {:else}
-              <span>Загрузить аккаунты</span>
-              <span>→</span>
-            {/if}
-          </button>
-        </div>
-      </div>
-
-      <div class="group relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-8 border border-gray-700 hover:border-blue-500 transition-all duration-300 shadow-xl hover:shadow-blue-500/20 hover:-translate-y-1">
-        <div class="absolute inset-0 bg-gradient-to-br from-blue-600/10 to-transparent opacity-0 group-hover:opacity-100 rounded-2xl transition-opacity duration-300"></div>
-        <div class="relative">
-          <div class="flex items-center gap-4 mb-6">
-            <div class="w-14 h-14 bg-blue-500/20 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform">
-              <span class="text-3xl">🏷️</span>
-            </div>
-            <h2 class="text-2xl font-bold text-white">Выставить аккаунт</h2>
-          </div>
-          <button
-            onclick={listAccount}
-            disabled={loading}
-            class="w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold rounded-xl hover:from-blue-500 hover:to-blue-600 active:scale-95 transition-all duration-200 shadow-lg hover:shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-3"
-          >
-            {#if loading}
-              <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <span>Обработка...</span>
-            {:else}
-              <span>Выставить аккаунт</span>
-              <span>→</span>
-            {/if}
-          </button>
-        </div>
-      </div>
+      <button
+        onclick={loadAccounts}
+        disabled={loading}
+        class="px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-semibold rounded-lg hover:from-purple-500 hover:to-purple-600 active:scale-95 transition-all duration-200 shadow-lg hover:shadow-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+      >
+        {#if loading}
+          <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span>Загрузка...</span>
+        {:else}
+          <span>📥</span>
+          <span>Загрузить аккаунты</span>
+        {/if}
+      </button>
     </div>
 
     {#if statusMessage}
-      <div class="max-w-4xl mx-auto mb-12">
+      <div class="max-w-4xl mx-auto mb-12 animate-fade-out">
         <div class="rounded-xl p-6 border {messageType === 'success' ? 'bg-green-500/10 border-green-500/30' : messageType === 'error' ? 'bg-red-500/10 border-red-500/30' : 'bg-blue-500/10 border-blue-500/30'}">
           <div class="flex items-center gap-4">
             <div class="w-10 h-10 rounded-full flex items-center justify-center {messageType === 'success' ? 'bg-green-500/20' : messageType === 'error' ? 'bg-red-500/20' : 'bg-blue-500/20'}">
@@ -199,3 +149,21 @@
     </div>
   </div>
 </main>
+
+<style>
+  @keyframes fade-out {
+    0% {
+      opacity: 1;
+    }
+    70% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  .animate-fade-out {
+    animation: fade-out 3s ease-out forwards;
+  }
+</style>
