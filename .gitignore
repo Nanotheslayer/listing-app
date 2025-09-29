@@ -1,0 +1,89 @@
+.DS_Store
+node_modules
+/build
+/.svelte-kit
+/package
+.env
+.env.*
+!.env.example
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-store/
+
+# Svelte / SvelteKit
+.svelte-kit/
+build/
+.output/
+.vercel/
+.netlify/
+
+# Vite
+dist/
+dist-ssr/
+*.local
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Rust / Cargo
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Tauri
+src-tauri/gen/
+src-tauri/WixTools/
+
+# Build outputs
+*.dmg
+*.app
+*.exe
+*.msi
+*.deb
+*.AppImage
+
+# Logs
+logs/
+*.log
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# API keys and secrets (ВАЖНО!)
+**/api-keys.json
+**/secrets.json
+**/*secret*
+**/*key*.txt
+
+# Coverage
+coverage/
+*.lcov
+.nyc_output/
