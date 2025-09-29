@@ -1,33 +1,50 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { accountManager, type Account } from "../lib/accounts";
+  import { goto } from "$app/navigation";
+  import { page } from "$app/stores";
 
   let loading = $state(false);
   let statusMessage = $state("");
   let messageType = $state<"success" | "error" | "info">("info");
+  let accounts = $state<Account[]>([]);
+  let lastPath = $state("");
 
-  let accounts = $state([
-    { id: 1, email: "player123@gmail.com", level: 45, server: "EU", status: "Готов" },
-    { id: 2, email: "gamer456@gmail.com", level: 62, server: "NA", status: "Готов" },
-    { id: 3, email: "pro789@gmail.com", level: 38, server: "Asia", status: "На продаже" },
-  ]);
+  // Загружаем и обновляем аккаунты при изменении страницы
+  $effect(() => {
+    // Подписываемся на изменения URL (чтобы обновлять при возврате)
+    $page.url.pathname;
+    // Загружаем аккаунты из менеджера
+    accounts = accountManager.getAccounts();
+    // Обновляем путь
+    lastPath = accountManager.getLastSelectedPath();
+  });
 
   async function loadAccounts() {
     loading = true;
     statusMessage = "";
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      statusMessage = "Аккаунты успешно загружены!";
-      messageType = "success";
-      
+      const result = await accountManager.selectAndLoadAccounts();
+
+      if (result.success) {
+        accounts = result.accounts;
+        lastPath = accountManager.getLastSelectedPath(); // Обновляем отображаемый путь
+        statusMessage = result.message;
+        messageType = "success";
+      } else {
+        statusMessage = result.message;
+        messageType = "error";
+      }
+
       // Автоматически скрыть сообщение через 3 секунды
       setTimeout(() => {
         statusMessage = "";
       }, 3000);
     } catch (error) {
+      console.error("Ошибка:", error);
       statusMessage = `Ошибка загрузки: ${error}`;
       messageType = "error";
-      
-      // Автоматически скрыть сообщение об ошибке через 3 секунды
+
       setTimeout(() => {
         statusMessage = "";
       }, 3000);
@@ -35,14 +52,74 @@
       loading = false;
     }
   }
+
+  async function listAccount(accountId: number) {
+    // Переходим на страницу выставления аккаунта
+    goto(`/list/${accountId}`);
+  }
+
+  function removeAccount(accountId: number) {
+    const account = accountManager.getAccount(accountId);
+    if (!account) return;
+
+    if (confirm(`Удалить аккаунт "${account.name}" из списка?`)) {
+      accountManager.removeAccount(accountId);
+      // Обновляем отображение
+      accounts = accountManager.getAccounts();
+
+      statusMessage = `Аккаунт ${account.name} удален из списка`;
+      messageType = "info";
+
+      setTimeout(() => {
+        statusMessage = "";
+      }, 3000);
+    }
+  }
+
+  function getStatusColor(status: Account["status"]) {
+    switch (status) {
+      case "loaded":
+        return "bg-green-500/20 text-green-400";
+      case "processing":
+        return "bg-blue-500/20 text-blue-400";
+      case "listed":
+        return "bg-purple-500/20 text-purple-400";
+      case "error":
+        return "bg-red-500/20 text-red-400";
+      default:
+        return "bg-gray-500/20 text-gray-400";
+    }
+  }
+
+  function getStatusText(status: Account["status"]) {
+    switch (status) {
+      case "loaded":
+        return "Загружен";
+      case "processing":
+        return "Обработка...";
+      case "listed":
+        return "На продаже";
+      case "error":
+        return "Ошибка";
+      default:
+        return status;
+    }
+  }
 </script>
 
 <main class="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-800">
   <div class="container mx-auto px-6 py-12">
-    <div class="max-w-6xl mx-auto mb-8 flex justify-end items-center gap-4">
-      <h1 class="text-4xl font-bold text-red-700">
-        G2G Manager
-      </h1>
+    <div class="max-w-6xl mx-auto mb-8 flex justify-between items-center gap-4">
+      <div>
+        <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
+          G2G Manager
+        </h1>
+        {#if lastPath}
+          <p class="text-gray-500 text-sm mt-1 font-mono truncate max-w-2xl" title={lastPath}>
+            📁 {lastPath}
+          </p>
+        {/if}
+      </div>
       <button
         onclick={loadAccounts}
         disabled={loading}
@@ -62,7 +139,7 @@
     </div>
 
     {#if statusMessage}
-      <div class="max-w-4xl mx-auto mb-12 animate-fade-out">
+      <div class="max-w-6xl mx-auto mb-8 animate-fade-out">
         <div class="rounded-xl p-6 border {messageType === 'success' ? 'bg-green-500/10 border-green-500/30' : messageType === 'error' ? 'bg-red-500/10 border-red-500/30' : 'bg-blue-500/10 border-blue-500/30'}">
           <div class="flex items-center gap-4">
             <div class="w-10 h-10 rounded-full flex items-center justify-center {messageType === 'success' ? 'bg-green-500/20' : messageType === 'error' ? 'bg-red-500/20' : 'bg-blue-500/20'}">
@@ -102,39 +179,47 @@
               <thead class="bg-gray-800/50">
                 <tr>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">ID</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Email</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Уровень</th>
-                  <th class="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Сервер</th>
+                  <th class="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Имя папки</th>
+                  <th class="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Путь</th>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Статус</th>
                   <th class="px-6 py-4 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">Действия</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-700/50">
-                {#each accounts as account}
+                {#each accounts as account (account.id)}
                   <tr class="hover:bg-gray-800/30 transition-colors">
                     <td class="px-6 py-4 whitespace-nowrap">
                       <span class="text-gray-300 font-medium">#{account.id}</span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
-                      <span class="text-gray-300">{account.email}</span>
+                      <span class="text-gray-300 font-semibold">{account.name}</span>
+                    </td>
+                    <td class="px-6 py-4">
+                      <span class="text-gray-500 text-sm font-mono truncate max-w-xs block" title={account.path}>
+                        {account.path}
+                      </span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
-                      <span class="text-purple-400 font-semibold">{account.level}</span>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap">
-                      <span class="text-gray-300">{account.server}</span>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap">
-                      <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold {account.status === 'Готов' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}">
-                        {account.status}
+                      <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold {getStatusColor(account.status)}">
+                        {getStatusText(account.status)}
                       </span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
                       <div class="flex gap-2">
-                        <button class="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors" title="Выставить">
+                        <button
+                          onclick={() => listAccount(account.id)}
+                          disabled={account.status === "processing"}
+                          class="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Выставить на продажу"
+                        >
                           🏷️
                         </button>
-                        <button class="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors" title="Удалить">
+                        <button
+                          onclick={() => removeAccount(account.id)}
+                          disabled={account.status === "processing"}
+                          class="p-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Удалить из списка"
+                        >
                           🗑️
                         </button>
                       </div>
