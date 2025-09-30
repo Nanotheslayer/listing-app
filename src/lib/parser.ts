@@ -336,3 +336,22 @@ export async function autofillListing(accountPath: string, files: string[]): Pro
     throw error;
   }
 }
+
+// Чтение личной информации из файла {accountName}.txt
+export async function readPersonalInfo(accountPath: string, accountName: string): Promise<string> {
+  try {
+    const fileName = `${accountName}.txt`;
+    console.log(`Reading personal info file: ${fileName}`);
+
+    const content = await readAccountFile(accountPath, fileName);
+
+    if (!content || content.trim().length === 0) {
+      return "❌ Файл с личной информацией не найден или пуст";
+    }
+
+    return content;
+  } catch (error) {
+    console.error("Ошибка чтения личной информации:", error);
+    return `❌ Не удалось прочитать файл: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}

@@ -4,7 +4,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { accountManager, type Account } from "../../../lib/accounts";
-  import { autofillListing, parseAccountData } from "../../../lib/parser";
+  import { autofillListing, parseAccountData, readPersonalInfo } from "../../../lib/parser";
   import { onMount, onDestroy } from "svelte";
 
   // Интерфейсы для API ответов
@@ -37,11 +37,17 @@
   // Поля формы
   let title = $state("");
   let description = $state("");
+  let price = $state("");
   let skinsPriceInfo = $state("Информация о ценах скинов появится здесь...");
 
   // Прогресс расчета цен
   let priceProgress = $state<PriceProgress | null>(null);
   let isCalculatingPrices = $state(false);
+
+  // Personal Info
+  let personalInfo = $state("");
+  let showPersonalInfo = $state(false);
+  let loadingPersonalInfo = $state(false);
 
   // Счетчики символов
   const MAX_TITLE_LENGTH = 128;
@@ -162,7 +168,7 @@
     if (!account) return;
 
     loading = true;
-    isCalculatingPrices = true; // ⬅️ ДОБАВЬТЕ ЭТУ СТРОКУ
+    isCalculatingPrices = true;
     statusMessage = "Подсчет цен скинов...";
     messageType = "info";
 
@@ -244,6 +250,82 @@ ${priceLines}
     }
   }
 
+  async function loadPersonalInfo() {
+    if (!account) return;
+
+    if (personalInfo) {
+      // Если уже загружено, просто переключаем видимость
+      showPersonalInfo = !showPersonalInfo;
+      return;
+    }
+
+    loadingPersonalInfo = true;
+    showPersonalInfo = true;
+
+    try {
+      console.log("Загрузка личной информации для:", account.name);
+      const info = await readPersonalInfo(account.path, account.name);
+      personalInfo = info;
+    } catch (error) {
+      console.error("Ошибка загрузки личной информации:", error);
+      personalInfo = `❌ Ошибка загрузки: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      loadingPersonalInfo = false;
+    }
+  }
+
+  async function openLink(url: string) {
+    try {
+      console.log("Opening URL:", url);
+      // Правильный вызов для opener plugin
+      await invoke('plugin:opener|open_url', {
+        url: url
+      });
+    } catch (error) {
+      console.error("Failed to open URL:", error);
+      statusMessage = `Не удалось открыть ссылку: ${error}`;
+      messageType = "error";
+      setTimeout(() => { statusMessage = ""; }, 3000);
+    }
+  }
+
+  function parseTextWithLinks(text: string): { type: 'text' | 'link', content: string }[] {
+    // Регулярное выражение для поиска URL
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts: { type: 'text' | 'link', content: string }[] = [];
+
+    let lastIndex = 0;
+    let match;
+
+    while ((match = urlRegex.exec(text)) !== null) {
+      // Добавляем текст перед ссылкой
+      if (match.index > lastIndex) {
+        parts.push({
+          type: 'text',
+          content: text.substring(lastIndex, match.index)
+        });
+      }
+
+      // Добавляем саму ссылку
+      parts.push({
+        type: 'link',
+        content: match[0]
+      });
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Добавляем оставшийся текст
+    if (lastIndex < text.length) {
+      parts.push({
+        type: 'text',
+        content: text.substring(lastIndex)
+      });
+    }
+
+    return parts;
+  }
+
   async function listAccount() {
     if (!account) return;
 
@@ -262,6 +344,13 @@ ${priceLines}
       return;
     }
 
+    if (!price.trim() || parseFloat(price) <= 0) {
+      statusMessage = "Укажите корректную цену товара";
+      messageType = "error";
+      setTimeout(() => { statusMessage = ""; }, 3000);
+      return;
+    }
+
     loading = true;
     statusMessage = "Выставление аккаунта на продажу...";
     messageType = "info";
@@ -273,6 +362,7 @@ ${priceLines}
         accountPath: account.path,
         title,
         description,
+        price: `$${price}`,
         skinsPriceInfo
       });
 
@@ -317,9 +407,22 @@ ${priceLines}
       target.value = description;
     }
   }
+
+  function handlePriceInput(e: Event) {
+    const target = e.target as HTMLInputElement;
+    // Разрешаем только цифры и одну точку
+    const value = target.value.replace(/[^\d.]/g, '');
+    // Убираем множественные точки
+    const parts = value.split('.');
+    if (parts.length > 2) {
+      target.value = parts[0] + '.' + parts.slice(1).join('');
+    } else {
+      target.value = value;
+    }
+    price = target.value;
+  }
 </script>
 
-<!-- Остальной HTML остается таким же -->
 <main class="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-800">
   <div class="container mx-auto px-6 py-8">
     <!-- Шапка -->
@@ -432,10 +535,36 @@ ${priceLines}
             ></textarea>
           </div>
 
+          <!-- Цена товара -->
+          <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
+            <div class="flex items-center gap-2 mb-4">
+              <span class="text-xl">💵</span>
+              <label class="text-lg font-semibold text-white">Цена товара</label>
+            </div>
+            <div class="relative">
+              <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <span class="text-gray-400 text-lg font-semibold">$</span>
+              </div>
+              <input
+                type="text"
+                bind:value={price}
+                oninput={handlePriceInput}
+                placeholder="0.00"
+                class="w-full pl-8 pr-4 py-3 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition text-lg font-semibold"
+              />
+            </div>
+            {#if price && parseFloat(price) > 0}
+              <div class="mt-3 text-sm text-gray-400 flex items-center gap-2">
+                <span>💰</span>
+                <span>Цена: <span class="text-green-400 font-semibold">${parseFloat(price).toFixed(2)}</span></span>
+              </div>
+            {/if}
+          </div>
+
           <!-- Кнопка выставления -->
           <button
             onclick={listAccount}
-            disabled={loading || !title.trim() || !description.trim()}
+            disabled={loading || !title.trim() || !description.trim() || !price || parseFloat(price) <= 0}
             class="w-full py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl transition-all duration-200 shadow-lg hover:shadow-green-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-3 text-lg"
           >
             {#if loading}
@@ -451,26 +580,23 @@ ${priceLines}
           </button>
         </div>
 
-        <!-- Правая колонка - Цены скинов -->
-        <!-- Правая колонка - Цены скинов -->
-        <div class="lg:col-span-1">
+        <!-- Правая колонка - Цены скинов и Personal Info -->
+        <div class="lg:col-span-1 space-y-6">
+          <!-- Цены скинов -->
           <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6 sticky top-6">
             <div class="flex items-center gap-2 mb-4">
               <span class="text-xl">💰</span>
               <h3 class="text-lg font-semibold text-white">Цены скинов</h3>
             </div>
 
-            <!-- Единое поле для прогресса и результатов -->
             <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4 mb-4 min-h-[300px] max-h-[400px] overflow-y-auto">
               {#if isCalculatingPrices && priceProgress}
-                <!-- Прогресс-бар внутри окна -->
                 <div class="space-y-4">
                   <div class="text-center">
                     <div class="text-2xl mb-2">🔄</div>
                     <div class="text-white font-semibold mb-4">Расчет цен скинов</div>
                   </div>
 
-                  <!-- Визуальный прогресс-бар -->
                   <div class="space-y-2">
                     <div class="flex items-center justify-between text-sm">
                       <span class="text-gray-400">
@@ -488,7 +614,6 @@ ${priceLines}
                       ></div>
                     </div>
 
-                    <!-- Текущий обрабатываемый скин -->
                     <div class="text-sm text-gray-300 text-center mt-4">
                       {#if priceProgress.status === "processing"}
                         <div class="flex items-center justify-center gap-2">
@@ -507,7 +632,6 @@ ${priceLines}
                   </div>
                 </div>
               {:else}
-                <!-- Результаты -->
                 <pre class="text-sm text-gray-300 whitespace-pre-wrap font-mono">{skinsPriceInfo}</pre>
               {/if}
             </div>
@@ -528,6 +652,63 @@ ${priceLines}
                 <span>Посчитать цены</span>
               {/if}
             </button>
+          </div>
+
+          <!-- Personal Info -->
+          <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
+            <button
+              onclick={loadPersonalInfo}
+              disabled={loadingPersonalInfo}
+              class="w-full flex items-center justify-between p-4 bg-gray-900/50 hover:bg-gray-900/70 rounded-lg transition-all duration-200 border border-gray-700 hover:border-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div class="flex items-center gap-3">
+                <span class="text-xl">👤</span>
+                <h3 class="text-lg font-semibold text-white">Personal Info</h3>
+              </div>
+              <div class="flex items-center gap-2">
+                {#if loadingPersonalInfo}
+                  <svg class="animate-spin h-5 w-5 text-purple-400" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                {:else}
+                  <svg
+                    class="w-5 h-5 text-gray-400 transition-transform duration-200 {showPersonalInfo ? 'rotate-180' : ''}"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                {/if}
+              </div>
+            </button>
+
+            {#if showPersonalInfo}
+              <div class="mt-4 animate-slide-down">
+                <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4 max-h-[400px] overflow-y-auto">
+                  <div class="text-sm text-gray-300 font-mono leading-relaxed whitespace-pre-wrap">
+                    {#each personalInfo.split('\n') as line}
+                      <div>
+                        {#each parseTextWithLinks(line) as part}
+                          {#if part.type === 'link'}
+                            <button
+                              onclick={() => openLink(part.content)}
+                              class="text-blue-400 hover:text-blue-300 underline hover:no-underline transition-colors cursor-pointer inline"
+                              title="Открыть в браузере"
+                            >
+                              {part.content}
+                            </button>
+                          {:else}
+                            <span>{part.content}</span>
+                          {/if}
+                        {/each}
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              </div>
+            {/if}
           </div>
         </div>
       </div>
@@ -550,6 +731,21 @@ ${priceLines}
 
   .animate-fade-out {
     animation: fade-out 3s ease-out forwards;
+  }
+
+  @keyframes slide-down {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-slide-down {
+    animation: slide-down 0.3s ease-out;
   }
 
   /* Стилизация скроллбара */
