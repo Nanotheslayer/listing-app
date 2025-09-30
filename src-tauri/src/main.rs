@@ -105,7 +105,32 @@ async fn get_account_files(account_path: String) -> Result<Vec<String>, String> 
     Ok(files)
 }
 
-// Команда для чтения текстового файла
+// Команда для чтения текстового файла из папки аккаунта
+// НОВАЯ КОМАНДА - принимает путь к папке и имя файла отдельно
+#[tauri::command]
+async fn read_account_file(account_path: String, file_name: String) -> Result<String, String> {
+    println!("Reading file '{}' from account: {}", file_name, account_path);
+    
+    // Правильно объединяем путь к папке и имя файла
+    let account_dir = PathBuf::from(&account_path);
+    let file_path = account_dir.join(&file_name);
+    
+    println!("Full file path: {:?}", file_path);
+    
+    if !file_path.exists() {
+        return Err(format!("Файл не найден: {}", file_name));
+    }
+    
+    match fs::read_to_string(&file_path) {
+        Ok(content) => {
+            println!("Successfully read {} bytes from {}", content.len(), file_name);
+            Ok(content)
+        },
+        Err(e) => Err(format!("Ошибка чтения файла: {}", e)),
+    }
+}
+
+// Старая команда (оставляем для совместимости)
 #[tauri::command]
 async fn read_text_file(path: String) -> Result<String, String> {
     println!("Reading text file: {}", path);
@@ -137,7 +162,8 @@ fn main() {
             greet,
             load_account_folders,
             get_account_files,
-            read_text_file
+            read_account_file,  // Новая команда
+            read_text_file      // Старая команда
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

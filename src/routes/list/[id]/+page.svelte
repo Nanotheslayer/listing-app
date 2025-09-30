@@ -3,6 +3,7 @@
   import { goto } from "$app/navigation";
   import { accountManager, type Account } from "../../../lib/accounts";
   import { autofillListing } from "../../../lib/parser";
+  import { onMount } from "svelte";
 
   // Получаем ID аккаунта из URL
   const accountId = parseInt($page.params.id);
@@ -24,8 +25,8 @@
   let titleLength = $derived(title.length);
   let descriptionLength = $derived(description.length);
 
-  // Загружаем данные аккаунта
-  $effect(() => {
+  // Загружаем данные аккаунта ОДИН РАЗ при монтировании компонента
+  onMount(() => {
     account = accountManager.getAccount(accountId);
     if (!account) {
       statusMessage = "Аккаунт не найден";
@@ -39,22 +40,51 @@
   }
 
   async function autoFillForm() {
-    if (!account) return;
+    if (!account) {
+      console.error("Account is undefined!");
+      return;
+    }
 
     loading = true;
     statusMessage = "Автозаполнение формы...";
     messageType = "info";
 
+    console.log("=== АВТОЗАПОЛНЕНИЕ НАЧАТО ===");
+    console.log("ID аккаунта:", accountId);
+    console.log("Путь аккаунта:", account.path);
+    console.log("Имя аккаунта:", account.name);
+
     try {
       // Получаем список файлов аккаунта
+      console.log("Шаг 1: Получаем файлы...");
       const files = await accountManager.getAccountFiles(accountId);
       console.log("Файлы аккаунта:", files);
 
+      if (!files || files.length === 0) {
+        throw new Error("Файлы не найдены в папке аккаунта");
+      }
+
       // Парсим и заполняем форму
+      console.log("Шаг 2: Вызываем autofillListing...");
       const result = await autofillListing(account.path, files);
 
+      console.log("Шаг 3: Получен результат");
+      console.log("Результат автозаполнения:", result);
+      console.log("Заголовок:", result.title);
+      console.log("Длина заголовка:", result.title.length);
+      console.log("Описание (первые 200 символов):", result.description.substring(0, 200));
+      console.log("Длина описания:", result.description.length);
+
+      // Присваиваем значения
+      console.log("Шаг 4: Присваиваем значения полям...");
       title = result.title;
       description = result.description;
+
+      console.log("Шаг 5: Значения присвоены");
+      console.log("title переменная:", title);
+      console.log("description переменная (первые 100 символов):", description.substring(0, 100));
+
+      console.log("=== АВТОЗАПОЛНЕНИЕ ЗАВЕРШЕНО УСПЕШНО ===");
 
       statusMessage = "Форма успешно заполнена!";
       messageType = "success";
@@ -63,14 +93,25 @@
         statusMessage = "";
       }, 3000);
     } catch (error) {
-      console.error("Ошибка автозаполнения:", error);
-      statusMessage = `Ошибка: ${error}`;
+      console.error("=== ОШИБКА АВТОЗАПОЛНЕНИЯ ===");
+      console.error("Тип ошибки:", typeof error);
+      console.error("Ошибка:", error);
+
+      if (error instanceof Error) {
+        console.error("Сообщение:", error.message);
+        console.error("Stack trace:", error.stack);
+      } else {
+        console.error("Не-Error объект:", String(error));
+      }
+
+      statusMessage = `Ошибка: ${error instanceof Error ? error.message : String(error)}`;
       messageType = "error";
 
       setTimeout(() => {
         statusMessage = "";
       }, 3000);
     } finally {
+      console.log("Шаг 6: Finally блок, loading = false");
       loading = false;
     }
   }
@@ -188,6 +229,7 @@
   }
 </script>
 
+<!-- Остальной HTML остается таким же -->
 <main class="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-800">
   <div class="container mx-auto px-6 py-8">
     <!-- Шапка -->
