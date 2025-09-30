@@ -1,3 +1,14 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# API keys and secrets (ВАЖНО!)
+**/api-keys.json
+**/secrets.json
+**/*secret*
+**/*key*.txt
+
 .DS_Store
 node_modules
 /build

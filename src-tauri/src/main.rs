@@ -5,6 +5,8 @@ use std::fs;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use rand::Rng;
+use tauri::Emitter;
 
 mod g2g_api;
 mod config;
@@ -43,22 +45,30 @@ pub struct SkinPriceResponse {
     pub most_expensive: Option<SkinPrice>,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct PriceProgressPayload {
+    current: usize,
+    total: usize,
+    skin_name: String,
+    status: String,
+}
+
 #[tauri::command]
 async fn load_account_folders(folder_path: String) -> Result<AccountsData, String> {
     println!("Loading account folders from: {}", folder_path);
-    
+
     let path = PathBuf::from(&folder_path);
-    
+
     if !path.exists() {
         return Err("Указанная папка не существует".to_string());
     }
-    
+
     if !path.is_dir() {
         return Err("Указанный путь не является папкой".to_string());
     }
-    
+
     let mut accounts = Vec::new();
-    
+
     match fs::read_dir(&path) {
         Ok(entries) => {
             for entry in entries {
@@ -86,11 +96,11 @@ async fn load_account_folders(folder_path: String) -> Result<AccountsData, Strin
             return Err(format!("Не удалось прочитать содержимое папки: {}", e));
         }
     }
-    
+
     accounts.sort_by(|a, b| a.name.cmp(&b.name));
-    
+
     println!("Найдено {} аккаунтов", accounts.len());
-    
+
     Ok(AccountsData {
         accounts,
         base_path: folder_path,
@@ -100,15 +110,15 @@ async fn load_account_folders(folder_path: String) -> Result<AccountsData, Strin
 #[tauri::command]
 async fn get_account_files(account_path: String) -> Result<Vec<String>, String> {
     println!("Getting files from account: {}", account_path);
-    
+
     let path = PathBuf::from(&account_path);
-    
+
     if !path.exists() || !path.is_dir() {
         return Err("Папка аккаунта не найдена".to_string());
     }
-    
+
     let mut files = Vec::new();
-    
+
     match fs::read_dir(&path) {
         Ok(entries) => {
             for entry in entries {
@@ -123,23 +133,23 @@ async fn get_account_files(account_path: String) -> Result<Vec<String>, String> 
             return Err(format!("Ошибка чтения файлов: {}", e));
         }
     }
-    
+
     Ok(files)
 }
 
 #[tauri::command]
 async fn read_account_file(account_path: String, file_name: String) -> Result<String, String> {
     println!("Reading file '{}' from account: {}", file_name, account_path);
-    
+
     let account_dir = PathBuf::from(&account_path);
     let file_path = account_dir.join(&file_name);
-    
+
     println!("Full file path: {:?}", file_path);
-    
+
     if !file_path.exists() {
         return Err(format!("Файл не найден: {}", file_name));
     }
-    
+
     match fs::read_to_string(&file_path) {
         Ok(content) => {
             println!("Successfully read {} bytes from {}", content.len(), file_name);
@@ -152,13 +162,13 @@ async fn read_account_file(account_path: String, file_name: String) -> Result<St
 #[tauri::command]
 async fn read_text_file(path: String) -> Result<String, String> {
     println!("Reading text file: {}", path);
-    
+
     let file_path = PathBuf::from(&path);
-    
+
     if !file_path.exists() {
         return Err(format!("Файл не найден: {}", path));
     }
-    
+
     match fs::read_to_string(&file_path) {
         Ok(content) => Ok(content),
         Err(e) => Err(format!("Ошибка чтения файла: {}", e)),
@@ -168,41 +178,53 @@ async fn read_text_file(path: String) -> Result<String, String> {
 #[tauri::command]
 async fn fetch_skin_prices(
     request: SkinPriceRequest,
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>
 ) -> Result<SkinPriceResponse, String> {
-    println!("Fetching prices for {} skins on server {}", request.skins.len(), request.server);
-    
+    let total_skins = request.skins.len();
+    println!("Fetching prices for {} skins on server {}", total_skins, request.server);
+
     let tokens = G2GAuthTokens {
         user_id: state.g2g_config.user_id.clone(),
         refresh_token: state.g2g_config.refresh_token.clone(),
         long_lived_token: state.g2g_config.long_lived_token.clone(),
         active_device_token: state.g2g_config.active_device_token.clone(),
     };
-    
+
     let mut prices = Vec::new();
     let mut total_value = 0.0;
     let mut most_expensive: Option<SkinPrice> = None;
     let mut max_price = 0.0;
-    
-    for skin in request.skins.iter() {
+
+    for (index, skin) in request.skins.iter().enumerate() {
+        let current = index + 1;
+
+        // Отправляем событие прогресса - начинаем обработку скина
+        let _ = app.emit("price-progress", PriceProgressPayload {
+            current,
+            total: total_skins,
+            skin_name: skin.clone(),
+            status: "processing".to_string(),
+        });
+
         println!("Fetching price for: {}", skin);
-        
-        // Используем tokio::sync::Mutex, поэтому .lock() возвращает Future
+
         let mut client = state.g2g_client.lock().await;
         let price_result = client.fetch_skin_price(skin, &request.server, &tokens).await;
-        drop(client); // Явно освобождаем lock
-        
+        drop(client);
+
         match price_result {
             Ok(price_str) => {
-                let numeric_price = if price_str.starts_with("$") {
-                    price_str.get(1..).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0)
+                let numeric_price = if price_str.starts_with("$") || price_str.starts_with("~$") {
+                    price_str.trim_start_matches('~').trim_start_matches('$')
+                        .parse::<f64>().ok().unwrap_or(0.0)
                 } else {
                     0.0
                 };
-                
+
                 if numeric_price > 0.0 {
                     total_value += numeric_price;
-                    
+
                     if numeric_price > max_price {
                         max_price = numeric_price;
                         most_expensive = Some(SkinPrice {
@@ -211,10 +233,18 @@ async fn fetch_skin_prices(
                         });
                     }
                 }
-                
+
                 prices.push(SkinPrice {
                     skin_name: skin.clone(),
                     price: price_str,
+                });
+
+                // Отправляем событие - скин обработан успешно
+                let _ = app.emit("price-progress", PriceProgressPayload {
+                    current,
+                    total: total_skins,
+                    skin_name: skin.clone(),
+                    status: "completed".to_string(),
                 });
             }
             Err(e) => {
@@ -223,12 +253,24 @@ async fn fetch_skin_prices(
                     skin_name: skin.clone(),
                     price: "Error".to_string(),
                 });
+
+                // Отправляем событие - ошибка
+                let _ = app.emit("price-progress", PriceProgressPayload {
+                    current,
+                    total: total_skins,
+                    skin_name: skin.clone(),
+                    status: "error".to_string(),
+                });
             }
         }
-        
-        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+
+        // Задержка между запросами
+        if current < total_skins {
+            let delay_ms = rand::thread_rng().gen_range(2000..3500);
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+        }
     }
-    
+
     Ok(SkinPriceResponse {
         prices,
         total_value: format!("${:.2}", total_value),
@@ -261,7 +303,7 @@ fn main() {
             eprintln!("Error loading G2G configuration: {}", e);
             eprintln!("Please create a .env file with G2G tokens");
             eprintln!("See .env.example for reference");
-            
+
             G2GConfig {
                 user_id: String::new(),
                 refresh_token: String::new(),

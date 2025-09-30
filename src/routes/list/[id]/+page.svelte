@@ -1,9 +1,30 @@
 <script lang="ts">
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
   import { accountManager, type Account } from "../../../lib/accounts";
-  import { autofillListing } from "../../../lib/parser";
-  import { onMount } from "svelte";
+  import { autofillListing, parseAccountData } from "../../../lib/parser";
+  import { onMount, onDestroy } from "svelte";
+
+  // Интерфейсы для API ответов
+  interface SkinPrice {
+    skin_name: string;
+    price: string;
+  }
+
+  interface SkinPriceResponse {
+    prices: SkinPrice[];
+    total_value: string;
+    most_expensive: SkinPrice | null;
+  }
+
+  interface PriceProgress {
+    current: number;
+    total: number;
+    skin_name: string;
+    status: string;
+  }
 
   // Получаем ID аккаунта из URL
   const accountId = parseInt($page.params.id);
@@ -18,6 +39,10 @@
   let description = $state("");
   let skinsPriceInfo = $state("Информация о ценах скинов появится здесь...");
 
+  // Прогресс расчета цен
+  let priceProgress = $state<PriceProgress | null>(null);
+  let isCalculatingPrices = $state(false);
+
   // Счетчики символов
   const MAX_TITLE_LENGTH = 128;
   const MAX_DESCRIPTION_LENGTH = 5000;
@@ -25,13 +50,30 @@
   let titleLength = $derived(title.length);
   let descriptionLength = $derived(description.length);
 
+  // Unsubscribe функция для событий
+  let unsubscribeProgress: (() => void) | null = null;
+
   // Загружаем данные аккаунта ОДИН РАЗ при монтировании компонента
-  onMount(() => {
+  onMount(async () => {
     account = accountManager.getAccount(accountId);
     if (!account) {
       statusMessage = "Аккаунт не найден";
       messageType = "error";
       setTimeout(() => goBack(), 2000);
+      return;
+    }
+
+    // Подписываемся на события прогресса
+    unsubscribeProgress = await listen<PriceProgress>("price-progress", (event) => {
+      priceProgress = event.payload;
+      console.log(`Progress: ${event.payload.current}/${event.payload.total} - ${event.payload.skin_name} (${event.payload.status})`);
+    });
+  });
+
+  // Отписываемся при размонтировании
+  onDestroy(() => {
+    if (unsubscribeProgress) {
+      unsubscribeProgress();
     }
   });
 
@@ -120,20 +162,62 @@
     if (!account) return;
 
     loading = true;
+    isCalculatingPrices = true; // ⬅️ ДОБАВЬТЕ ЭТУ СТРОКУ
     statusMessage = "Подсчет цен скинов...";
     messageType = "info";
 
     try {
-      // TODO: Здесь будет реальная логика подсчета цен
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Шаг 1: Получаем файлы аккаунта
+      console.log("Получение файлов аккаунта...");
+      const files = await accountManager.getAccountFiles(accountId);
+
+      if (!files || files.length === 0) {
+        throw new Error("Файлы не найдены в папке аккаунта");
+      }
+
+      // Шаг 2: Парсим данные аккаунта для получения списка скинов и сервера
+      console.log("Парсинг данных аккаунта...");
+      const accountData = await parseAccountData(account.path, files);
+
+      console.log("Найдено скинов:", accountData.skinsList.length);
+      console.log("Сервер:", accountData.server);
+
+      if (accountData.skinsList.length === 0) {
+        skinsPriceInfo = "❌ Скины не найдены в данных аккаунта";
+        statusMessage = "Скины не найдены";
+        messageType = "error";
+        setTimeout(() => { statusMessage = ""; }, 3000);
+        return;
+      }
+
+      // Шаг 3: Вызываем Rust команду для получения цен
+      statusMessage = `Получение цен для ${accountData.skinsList.length} скинов...`;
+      console.log("Вызов fetch_skin_prices...");
+
+      const response = await invoke<SkinPriceResponse>("fetch_skin_prices", {
+        request: {
+          skins: accountData.skinsList,
+          server: accountData.server
+        }
+      });
+
+      console.log("Получен ответ от API:", response);
+
+      // Шаг 4: Форматируем результат для отображения
+      const priceLines = response.prices.map(p =>
+        `  • ${p.skin_name}: ${p.price}`
+      ).join('\n');
 
       skinsPriceInfo = `
 📊 Анализ завершен для аккаунта: ${account.name}
+🌍 Сервер: ${accountData.server}
 
-Найдено скинов: 15
-Общая стоимость: $1,234.56
-Самый дорогой: Dragon Lore ($850.00)
-Средняя цена: $82.30
+Найдено скинов: ${response.prices.length}
+💰 Общая стоимость: ${response.total_value}
+${response.most_expensive ? `⭐ Самый дорогой: ${response.most_expensive.skin_name} (${response.most_expensive.price})` : ''}
+
+📋 Список цен:
+${priceLines}
       `.trim();
 
       statusMessage = "Цены успешно рассчитаны!";
@@ -142,8 +226,13 @@
       setTimeout(() => {
         statusMessage = "";
       }, 3000);
+
     } catch (error) {
-      statusMessage = `Ошибка расчета: ${error}`;
+      console.error("Ошибка расчета цен:", error);
+
+      skinsPriceInfo = `❌ Ошибка получения цен:\n${error instanceof Error ? error.message : String(error)}`;
+
+      statusMessage = `Ошибка расчета: ${error instanceof Error ? error.message : String(error)}`;
       messageType = "error";
 
       setTimeout(() => {
@@ -151,6 +240,7 @@
       }, 3000);
     } finally {
       loading = false;
+      isCalculatingPrices = false;
     }
   }
 
@@ -362,6 +452,7 @@
         </div>
 
         <!-- Правая колонка - Цены скинов -->
+        <!-- Правая колонка - Цены скинов -->
         <div class="lg:col-span-1">
           <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6 sticky top-6">
             <div class="flex items-center gap-2 mb-4">
@@ -369,24 +460,73 @@
               <h3 class="text-lg font-semibold text-white">Цены скинов</h3>
             </div>
 
+            <!-- Единое поле для прогресса и результатов -->
             <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4 mb-4 min-h-[300px] max-h-[400px] overflow-y-auto">
-              <pre class="text-sm text-gray-300 whitespace-pre-wrap font-mono">{skinsPriceInfo}</pre>
+              {#if isCalculatingPrices && priceProgress}
+                <!-- Прогресс-бар внутри окна -->
+                <div class="space-y-4">
+                  <div class="text-center">
+                    <div class="text-2xl mb-2">🔄</div>
+                    <div class="text-white font-semibold mb-4">Расчет цен скинов</div>
+                  </div>
+
+                  <!-- Визуальный прогресс-бар -->
+                  <div class="space-y-2">
+                    <div class="flex items-center justify-between text-sm">
+                      <span class="text-gray-400">
+                        Обработка: {priceProgress.current} / {priceProgress.total}
+                      </span>
+                      <span class="text-gray-400">
+                        {Math.round((priceProgress.current / priceProgress.total) * 100)}%
+                      </span>
+                    </div>
+
+                    <div class="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                      <div
+                        class="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300 ease-out"
+                        style="width: {(priceProgress.current / priceProgress.total) * 100}%"
+                      ></div>
+                    </div>
+
+                    <!-- Текущий обрабатываемый скин -->
+                    <div class="text-sm text-gray-300 text-center mt-4">
+                      {#if priceProgress.status === "processing"}
+                        <div class="flex items-center justify-center gap-2">
+                          <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          <span>Обработка: {priceProgress.skin_name}</span>
+                        </div>
+                      {:else if priceProgress.status === "completed"}
+                        <div class="text-green-400">✅ Завершено: {priceProgress.skin_name}</div>
+                      {:else if priceProgress.status === "error"}
+                        <div class="text-red-400">❌ Ошибка: {priceProgress.skin_name}</div>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
+              {:else}
+                <!-- Результаты -->
+                <pre class="text-sm text-gray-300 whitespace-pre-wrap font-mono">{skinsPriceInfo}</pre>
+              {/if}
             </div>
 
             <button
               onclick={calculatePrices}
-              disabled={loading}
+              disabled={loading || isCalculatingPrices}
               class="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-lg transition-all duration-200 shadow-lg hover:shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {#if loading}
+              {#if isCalculatingPrices}
                 <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
                   <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
+                <span>Расчет... {priceProgress ? `${priceProgress.current}/${priceProgress.total}` : ''}</span>
               {:else}
                 <span>🧮</span>
+                <span>Посчитать цены</span>
               {/if}
-              <span>Посчитать цены</span>
             </button>
           </div>
         </div>
