@@ -34,28 +34,34 @@ export class AccountManager {
   private nextId: number = 1;
   private lastSelectedPath: string = "";
   private readonly STORAGE_KEY = "g2g_last_folder_path";
+  private initialized: boolean = false;
 
   constructor() {
-    // Инициализируем при создании
-    this.initLastPath();
+    // Синхронный конструктор - инициализацию делаем отдельно
+    this.loadLastPathSync();
   }
 
-  // Асинхронная инициализация последнего пути
-  private async initLastPath(): Promise<void> {
+  // Синхронная загрузка из localStorage
+  private loadLastPathSync(): void {
     try {
       const saved = localStorage.getItem(this.STORAGE_KEY);
       if (saved) {
         this.lastSelectedPath = saved;
         console.log("Загружен сохраненный путь:", saved);
-      } else {
-        // Если нет сохраненного пути, используем домашнюю директорию
-        this.lastSelectedPath = await homeDir();
-        console.log("Используем домашнюю директорию:", this.lastSelectedPath);
+        this.initialized = true;
       }
     } catch (error) {
       console.warn("Не удалось загрузить последний путь:", error);
+    }
+  }
+
+  // Асинхронная инициализация с домашней директорией
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initialized || !this.lastSelectedPath) {
       try {
         this.lastSelectedPath = await homeDir();
+        this.initialized = true;
+        console.log("Используем домашнюю директорию:", this.lastSelectedPath);
       } catch (e) {
         console.error("Не удалось получить домашнюю директорию:", e);
       }
@@ -77,13 +83,7 @@ export class AccountManager {
   async selectAndLoadAccounts(): Promise<LoadAccountsResult> {
     try {
       // Убедимся что путь инициализирован
-      if (!this.lastSelectedPath) {
-        try {
-          this.lastSelectedPath = await homeDir();
-        } catch (e) {
-          console.warn("Не удалось получить домашнюю директорию:", e);
-        }
-      }
+      await this.ensureInitialized();
 
       console.log("Открываем диалог с начальным путем:", this.lastSelectedPath);
 

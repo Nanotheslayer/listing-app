@@ -105,6 +105,23 @@ async fn get_account_files(account_path: String) -> Result<Vec<String>, String> 
     Ok(files)
 }
 
+// Команда для чтения текстового файла
+#[tauri::command]
+async fn read_text_file(path: String) -> Result<String, String> {
+    println!("Reading text file: {}", path);
+    
+    let file_path = PathBuf::from(&path);
+    
+    if !file_path.exists() {
+        return Err(format!("Файл не найден: {}", path));
+    }
+    
+    match fs::read_to_string(&file_path) {
+        Ok(content) => Ok(content),
+        Err(e) => Err(format!("Ошибка чтения файла: {}", e)),
+    }
+}
+
 // Простая команда приветствия (оставляем для совместимости)
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -119,7 +136,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             greet,
             load_account_folders,
-            get_account_files
+            get_account_files,
+            read_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
