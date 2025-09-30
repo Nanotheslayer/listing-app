@@ -176,6 +176,67 @@ async fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn open_account_screenshot(account_path: String) -> Result<(), String> {
+    println!("Opening screenshot from: {}", account_path);
+
+    let path = PathBuf::from(&account_path);
+
+    if !path.exists() || !path.is_dir() {
+        return Err("Папка аккаунта не найдена".to_string());
+    }
+
+    // Ищем первый .png файл
+    match fs::read_dir(&path) {
+        Ok(entries) => {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let entry_path = entry.path();
+                    if entry_path.is_file() {
+                        if let Some(ext) = entry_path.extension() {
+                            if ext.to_str() == Some("png") {
+                                // Открываем файл через системное приложение
+                                let path_str = entry_path.to_string_lossy().to_string();
+
+                                println!("Found PNG file: {}", path_str);
+
+                                #[cfg(target_os = "windows")]
+                                {
+                                    std::process::Command::new("cmd")
+                                        .args(&["/C", "start", "", &path_str])
+                                        .spawn()
+                                        .map_err(|e| format!("Failed to open image: {}", e))?;
+                                }
+
+                                #[cfg(target_os = "macos")]
+                                {
+                                    std::process::Command::new("open")
+                                        .arg(&path_str)
+                                        .spawn()
+                                        .map_err(|e| format!("Failed to open image: {}", e))?;
+                                }
+
+                                #[cfg(target_os = "linux")]
+                                {
+                                    std::process::Command::new("xdg-open")
+                                        .arg(&path_str)
+                                        .spawn()
+                                        .map_err(|e| format!("Failed to open image: {}", e))?;
+                                }
+
+                                println!("Screenshot opened successfully");
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+            Err("PNG файлы не найдены в папке аккаунта".to_string())
+        }
+        Err(e) => Err(format!("Ошибка чтения папки аккаунта: {}", e))
+    }
+}
+
+#[tauri::command]
 async fn fetch_skin_prices(
     request: SkinPriceRequest,
     app: tauri::AppHandle,
@@ -199,7 +260,6 @@ async fn fetch_skin_prices(
     for (index, skin) in request.skins.iter().enumerate() {
         let current = index + 1;
 
-        // Отправляем событие прогресса - начинаем обработку скина
         let _ = app.emit("price-progress", PriceProgressPayload {
             current,
             total: total_skins,
@@ -239,7 +299,6 @@ async fn fetch_skin_prices(
                     price: price_str,
                 });
 
-                // Отправляем событие - скин обработан успешно
                 let _ = app.emit("price-progress", PriceProgressPayload {
                     current,
                     total: total_skins,
@@ -254,7 +313,6 @@ async fn fetch_skin_prices(
                     price: "Error".to_string(),
                 });
 
-                // Отправляем событие - ошибка
                 let _ = app.emit("price-progress", PriceProgressPayload {
                     current,
                     total: total_skins,
@@ -264,7 +322,6 @@ async fn fetch_skin_prices(
             }
         }
 
-        // Задержка между запросами
         if current < total_skins {
             let delay_ms = rand::thread_rng().gen_range(2000..3500);
             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
@@ -328,7 +385,8 @@ fn main() {
             read_account_file,
             read_text_file,
             fetch_skin_prices,
-            get_g2g_config_status
+            get_g2g_config_status,
+            open_account_screenshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

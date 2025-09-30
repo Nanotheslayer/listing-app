@@ -49,6 +49,11 @@
   let showPersonalInfo = $state(false);
   let loadingPersonalInfo = $state(false);
 
+  // In-game Info
+  let inGameInfo = $state("");
+  let showInGameInfo = $state(false);
+  let loadingInGameInfo = $state(false);
+
   // Счетчики символов
   const MAX_TITLE_LENGTH = 128;
   const MAX_DESCRIPTION_LENGTH = 5000;
@@ -274,6 +279,48 @@ ${priceLines}
     }
   }
 
+  async function loadInGameInfo() {
+    if (!account) return;
+
+    if (inGameInfo) {
+      // Если уже загружено, просто переключаем видимость
+      showInGameInfo = !showInGameInfo;
+      return;
+    }
+
+    loadingInGameInfo = true;
+    showInGameInfo = true;
+
+    try {
+      console.log("Загрузка игровой информации для:", account.name);
+
+      // Получаем список файлов
+      const files = await accountManager.getAccountFiles(accountId);
+
+      // Ищем файл *_info.txt (но не просто Info.txt)
+      const infoFile = files.find(f =>
+        f.toLowerCase().endsWith("_info.txt") &&
+        f.toLowerCase() !== "info.txt"
+      );
+
+      if (!infoFile) {
+        inGameInfo = "❌ Файл с игровой информацией (*_info.txt) не найден";
+      } else {
+        console.log("Найден файл игровой информации:", infoFile);
+        const content = await invoke<string>("read_account_file", {
+          accountPath: account.path,
+          fileName: infoFile
+        });
+        inGameInfo = content;
+      }
+    } catch (error) {
+      console.error("Ошибка загрузки игровой информации:", error);
+      inGameInfo = `❌ Ошибка загрузки: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      loadingInGameInfo = false;
+    }
+  }
+
   async function openLink(url: string) {
     try {
       console.log("Opening URL:", url);
@@ -284,6 +331,26 @@ ${priceLines}
     } catch (error) {
       console.error("Failed to open URL:", error);
       statusMessage = `Не удалось открыть ссылку: ${error}`;
+      messageType = "error";
+      setTimeout(() => { statusMessage = ""; }, 3000);
+    }
+  }
+
+  async function openScreenshot() {
+    if (!account) return;
+
+    try {
+      console.log("Opening screenshot for:", account.name);
+      await invoke("open_account_screenshot", {
+        accountPath: account.path
+      });
+
+      statusMessage = "Скриншот открыт";
+      messageType = "success";
+      setTimeout(() => { statusMessage = ""; }, 2000);
+    } catch (error) {
+      console.error("Error opening screenshot:", error);
+      statusMessage = `Ошибка открытия скриншота: ${error}`;
       messageType = "error";
       setTimeout(() => { statusMessage = ""; }, 3000);
     }
@@ -709,6 +776,78 @@ ${priceLines}
                 </div>
               </div>
             {/if}
+          </div>
+
+          <!-- In-game Info -->
+          <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
+            <button
+              onclick={loadInGameInfo}
+              disabled={loadingInGameInfo}
+              class="w-full flex items-center justify-between p-4 bg-gray-900/50 hover:bg-gray-900/70 rounded-lg transition-all duration-200 border border-gray-700 hover:border-indigo-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div class="flex items-center gap-3">
+                <span class="text-xl">🎮</span>
+                <h3 class="text-lg font-semibold text-white">In-game Info</h3>
+              </div>
+              <div class="flex items-center gap-2">
+                {#if loadingInGameInfo}
+                  <svg class="animate-spin h-5 w-5 text-indigo-400" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                {:else}
+                  <svg
+                    class="w-5 h-5 text-gray-400 transition-transform duration-200 {showInGameInfo ? 'rotate-180' : ''}"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                {/if}
+              </div>
+            </button>
+
+            {#if showInGameInfo}
+              <div class="mt-4 animate-slide-down">
+                <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4 max-h-[400px] overflow-y-auto">
+                  <div class="text-sm text-gray-300 font-mono leading-relaxed whitespace-pre-wrap">
+                    {#each inGameInfo.split('\n') as line}
+                      <div>
+                        {#each parseTextWithLinks(line) as part}
+                          {#if part.type === 'link'}
+                            <button
+                              onclick={() => openLink(part.content)}
+                              class="text-blue-400 hover:text-blue-300 underline hover:no-underline transition-colors cursor-pointer inline"
+                              title="Открыть в браузере"
+                            >
+                              {part.content}
+                            </button>
+                          {:else}
+                            <span>{part.content}</span>
+                          {/if}
+                        {/each}
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              </div>
+            {/if}
+          </div>
+
+          <!-- Screenshot -->
+          <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
+            <button
+              onclick={openScreenshot}
+              class="w-full flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-lg transition-all duration-200 shadow-lg hover:shadow-emerald-500/50"
+              title="Открыть скриншот аккаунта"
+            >
+              <span class="text-2xl">🖼️</span>
+              <h3 class="text-lg font-semibold text-white">Показать скриншот</h3>
+            </button>
+            <p class="text-xs text-gray-400 mt-3 text-center">
+              Откроет первый PNG файл из папки аккаунта
+            </p>
           </div>
         </div>
       </div>
