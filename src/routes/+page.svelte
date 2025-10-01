@@ -76,14 +76,18 @@
     }
   }
 
-  function getStatusColor(status: Account["status"]) {
+  function getStatusColor(status: Account["status"], is_listed?: boolean) {
+    if (is_listed) {
+      return "bg-green-500/20 text-green-400";
+    }
+
     switch (status) {
       case "loaded":
-        return "bg-green-500/20 text-green-400";
-      case "processing":
         return "bg-blue-500/20 text-blue-400";
+      case "processing":
+        return "bg-yellow-500/20 text-yellow-400";
       case "listed":
-        return "bg-purple-500/20 text-purple-400";
+        return "bg-green-500/20 text-green-400";
       case "error":
         return "bg-red-500/20 text-red-400";
       default:
@@ -91,14 +95,18 @@
     }
   }
 
-  function getStatusText(status: Account["status"]) {
+  function getStatusText(status: Account["status"], is_listed?: boolean) {
+    if (is_listed) {
+      return "В продаже";
+    }
+
     switch (status) {
       case "loaded":
         return "Загружен";
       case "processing":
         return "Обработка...";
       case "listed":
-        return "На продаже";
+        return "В продаже";
       case "error":
         return "Ошибка";
       default:
@@ -192,7 +200,15 @@
                       <span class="text-gray-300 font-medium">#{account.id}</span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
-                      <span class="text-gray-300 font-semibold">{account.name}</span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-gray-300 font-semibold">{account.name}</span>
+                        {#if account.is_listed}
+                          <span class="inline-flex items-center gap-1 px-2 py-1 bg-green-500/20 text-green-400 rounded text-xs font-semibold">
+                            <span>🏷️</span>
+                            <span>В продаже</span>
+                          </span>
+                        {/if}
+                      </div>
                     </td>
                     <td class="px-6 py-4">
                       <span class="text-gray-500 text-sm font-mono truncate max-w-xs block" title={account.path}>
@@ -200,8 +216,8 @@
                       </span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
-                      <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold {getStatusColor(account.status)}">
-                        {getStatusText(account.status)}
+                      <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold {getStatusColor(account.status, account.is_listed)}">
+                        {getStatusText(account.status, account.is_listed)}
                       </span>
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">

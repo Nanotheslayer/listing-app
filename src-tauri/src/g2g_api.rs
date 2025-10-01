@@ -449,11 +449,9 @@ impl G2GApiClient {
     pub async fn create_offer_id(&mut self, tokens: &G2GAuthTokens) -> Result<String, String> {
         println!("📝 Creating empty offer to get ID...");
 
-        // Ensure we have a valid token
-        if self.current_token.is_none() {
-            println!("🔑 No token available, refreshing...");
-            self.refresh_token(tokens).await?;
-        }
+        // ВАЖНО: Принудительно обновляем токен перед созданием оффера
+        println!("🔄 Refreshing token before creating offer...");
+        self.refresh_token(tokens).await?;
 
         let url = format!("{}/offer", self.base_url);
 
@@ -476,6 +474,36 @@ impl G2GApiClient {
 
         let status = response.status();
         println!("📥 Create offer response status: {}", status);
+
+        if status == 401 {
+            // Если все еще 401, пробуем еще раз с новым токеном
+            println!("⚠️  Got 401, refreshing token and retrying...");
+            self.current_token = None;
+            self.refresh_token(tokens).await?;
+
+            let headers = self.get_browser_headers(true);
+            let response = self.client
+                .post(&url)
+                .headers(headers)
+                .json(&request)
+                .send()
+                .await
+                .map_err(|e| format!("Failed to create offer (retry): {}", e))?;
+
+            let status = response.status();
+            println!("📥 Create offer response status (retry): {}", status);
+
+            if !status.is_success() {
+                let error_body = response.text().await.unwrap_or_else(|_| "Unable to read error".to_string());
+                return Err(format!("Failed to create offer after retry: {} - {}", status, error_body));
+            }
+
+            let json: CreateOfferResponse = response.json().await
+                .map_err(|e| format!("Failed to parse create offer response: {}", e))?;
+
+            println!("✅ Offer ID created: {}", json.payload.offer_id);
+            return Ok(json.payload.offer_id);
+        }
 
         if !status.is_success() {
             let error_body = response.text().await.unwrap_or_else(|_| "Unable to read error".to_string());

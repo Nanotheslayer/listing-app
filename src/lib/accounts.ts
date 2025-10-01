@@ -6,6 +6,7 @@ import { homeDir } from "@tauri-apps/api/path";
 export interface AccountFolder {
   name: string;
   path: string;
+  is_listed: boolean;
 }
 
 export interface AccountsData {
@@ -19,6 +20,7 @@ export interface Account {
   path: string;
   status: "loaded" | "processing" | "listed" | "error";
   files?: string[];
+  is_listed?: boolean;
 }
 
 export interface LoadAccountsResult {
@@ -123,12 +125,13 @@ export class AccountManager {
 
       this.basePath = result.base_path;
 
-      // Преобразуем в формат Account
+      // Преобразуем в формат Account, сохраняя is_listed
       this.accounts = result.accounts.map((folder) => ({
         id: this.nextId++,
         name: folder.name,
         path: folder.path,
-        status: "loaded" as const,
+        status: folder.is_listed ? ("listed" as const) : ("loaded" as const),  // ← Автоматически ставим статус
+        is_listed: folder.is_listed,  // ← Сохраняем поле
       }));
 
       return {

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use rand::Rng;
 use tauri::Emitter;
+use chrono;
 
 mod g2g_api;
 mod config;
@@ -24,6 +25,7 @@ struct AppState {
 pub struct AccountFolder {
     pub name: String,
     pub path: String,
+    pub is_listed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,6 +68,40 @@ struct PriceProgressPayload {
     status: String,
 }
 
+fn save_offer_id_to_file(account_path: &str, offer_id: &str) -> Result<(), String> {
+    println!("💾 Saving offer_id to file...");
+
+    let path = PathBuf::from(account_path);
+    let file_path = path.join(format!("{}.txt", offer_id));
+
+    let content = format!(
+        "Offer ID: {}\nCreated: {}\nStatus: Live\n",
+        offer_id,
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+    );
+
+    fs::write(&file_path, content)
+        .map_err(|e| format!("Failed to save offer_id file: {}", e))?;
+
+    println!("✅ Offer ID saved to: {:?}", file_path);
+    Ok(())
+}
+
+fn check_if_listed(account_path: &str) -> bool {
+    if let Ok(entries) = fs::read_dir(account_path) {
+        for entry in entries.flatten() {
+            if let Some(filename) = entry.file_name().to_str() {
+                // Проверяем, начинается ли имя файла с "G17" и заканчивается на .txt
+                if filename.starts_with("G17") && filename.ends_with(".txt") {
+                    println!("   ✓ Found offer file: {}", filename);
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[tauri::command]
 async fn create_g2g_offer(
     request: CreateOfferRequest,
@@ -74,6 +110,7 @@ async fn create_g2g_offer(
     println!("🎯 Creating G2G offer...");
     println!("   Title: {}", request.title);
     println!("   Server: {}", request.server);
+    println!("   Account path: {}", request.account_path);
 
     let tokens = G2GAuthTokens {
         user_id: state.g2g_config.user_id.clone(),
@@ -123,11 +160,15 @@ async fn create_g2g_offer(
         request.champions_count,
         request.skins_count,
         &csv_data,
-        screenshot_url.as_deref(),  // ← Добавили недостающий аргумент
+        screenshot_url.as_deref(),
         &tokens,
     ).await?;
 
     println!("✅ Offer created with data! ID: {}", offer_id);
+
+    // Сохраняем offer_id в файл в папке аккаунта
+    save_offer_id_to_file(&request.account_path, &offer_id)?;
+
     Ok(offer_id)
 }
 
@@ -195,9 +236,15 @@ async fn load_account_folders(folder_path: String) -> Result<AccountsData, Strin
                         if entry_path.is_dir() {
                             if let Some(folder_name) = entry_path.file_name() {
                                 if let Some(name_str) = folder_name.to_str() {
+                                    let path_str = entry_path.to_string_lossy().to_string();
+
+                                    // Проверяем статус
+                                    let is_listed = check_if_listed(&path_str);
+
                                     accounts.push(AccountFolder {
                                         name: name_str.to_string(),
-                                        path: entry_path.to_string_lossy().to_string(),
+                                        path: path_str,
+                                        is_listed,  // ← Новое поле
                                     });
                                 }
                             }
@@ -216,7 +263,8 @@ async fn load_account_folders(folder_path: String) -> Result<AccountsData, Strin
 
     accounts.sort_by(|a, b| a.name.cmp(&b.name));
 
-    println!("Найдено {} аккаунтов", accounts.len());
+    let listed_count = accounts.iter().filter(|a| a.is_listed).count();
+    println!("Найдено {} аккаунтов ({} в продаже)", accounts.len(), listed_count);
 
     Ok(AccountsData {
         accounts,
@@ -474,6 +522,7 @@ async fn create_listing(
     champions_count: i32,
     skins_count: i32,
     personal_info: String,
+    account_path: String,
     state: tauri::State<'_, AppState>
 ) -> Result<String, String> {
     println!("📋 Creating listing - received personal_info:");
@@ -516,6 +565,10 @@ async fn create_listing(
     ).await?;
 
     println!("✅ Offer created! ID: {}", offer_id);
+
+    // Сохраняем offer_id в файл
+    save_offer_id_to_file(&account_path, &offer_id)?;
+
     Ok(offer_id)
 }
 

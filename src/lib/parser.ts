@@ -89,9 +89,9 @@ function extractList(text: string, startMarker: string): string[] {
 // Нормализация имени сервера
 function normalizeServer(server: string): string {
   const serverMap: Record<string, string> = {
-    "brazil": "BR1",
-    "br": "BR1",
-    "br1": "BR1",
+    "brazil": "BR",
+    "br": "BR",
+    "br1": "BR",
     "euw": "EUW",
     "euw1": "EUW",
     "eune": "EUNE",
