@@ -1,12 +1,9 @@
 name: Build G2G App
 
 on:
-  # Запуск при пуше в main
+  # Запуск при пуше в main или при создании тега
   push:
     branches: [main]
-  
-  # Запуск при создании тега (для релизов)
-  push:
     tags:
       - 'v*'
   
