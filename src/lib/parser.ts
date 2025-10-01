@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { sortChampionsByUsage } from "./championTracking";
 
 // Типы данных
 export interface AccountData {
@@ -19,6 +20,7 @@ export interface AccountData {
 export interface ParsedForm {
   title: string;
   description: string;
+  usedChampions: string[];
 }
 
 // Чтение файла из папки аккаунта
@@ -217,7 +219,7 @@ export async function parseAccountData(accountPath: string, files: string[]): Pr
 }
 
 // Генерация заголовка
-export function generateTitle(data: AccountData): string {
+export function generateTitle(data: AccountData): { title: string; usedChampions: string[] } {
   const MAX_LENGTH = 128;
 
   // Базовая часть
@@ -231,6 +233,7 @@ export function generateTitle(data: AccountData): string {
 
   // Если есть скины, добавляем их в приоритете
   const items: string[] = [];
+  const usedChampions: string[] = []; // 👈 Отслеживаем использованные чемпионы
   let currentSpace = availableSpace;
 
   // Сначала добавляем скины
@@ -247,11 +250,16 @@ export function generateTitle(data: AccountData): string {
   }
 
   // Если осталось место, добавляем чемпионов
+  // 👇 ИЗМЕНЕНИЕ: Сортируем чемпионов по частоте использования
   if (currentSpace > 0 && data.championsList.length > 0) {
-    for (const champion of data.championsList) {
+    const sortedChampions = sortChampionsByUsage(data.championsList);
+    console.log('📋 Чемпионы отсортированы по частоте использования');
+
+    for (const champion of sortedChampions) {
       const itemLength = champion.length + 3; // +3 для " | "
       if (itemLength <= currentSpace) {
         items.push(champion);
+        usedChampions.push(champion); // 👈 Запоминаем использованного чемпиона
         currentSpace -= itemLength;
       } else {
         break;
@@ -263,12 +271,13 @@ export function generateTitle(data: AccountData): string {
   }
 
   // Формируем итоговый заголовок
-  if (items.length > 0) {
-    const itemsPart = " | " + items.join(" | ");
-    return baseTitle + itemsPart + endTitle;
-  }
+  const title = items.length > 0
+    ? baseTitle + " | " + items.join(" | ") + endTitle
+    : baseTitle + endTitle;
 
-  return baseTitle + endTitle;
+  console.log(`✅ Заголовок создан. Использовано чемпионов: ${usedChampions.length}`);
+
+  return { title, usedChampions }; // 👈 Возвращаем и заголовок, и список чемпионов
 }
 
 // Генерация описания
@@ -321,16 +330,17 @@ export async function autofillListing(accountPath: string, files: string[]): Pro
     // Парсим данные из файлов
     const data = await parseAccountData(accountPath, files);
 
-    // Генерируем заголовок и описание
-    const title = generateTitle(data);
+    // 👇 ИЗМЕНЕНИЕ: Теперь получаем и заголовок, и список чемпионов
+    const { title, usedChampions } = generateTitle(data);
     const description = generateDescription(data);
 
     console.log("=== Автозаполнение завершено ===");
     console.log("Длина заголовка:", title.length);
     console.log("Длина описания:", description.length);
-    console.log("Заголовок:", title);
+    console.log("Использовано чемпионов:", usedChampions);
 
-    return { title, description };
+    // 👇 Возвращаем список использованных чемпионов
+    return { title, description, usedChampions };
   } catch (error) {
     console.error("=== ОШИБКА автозаполнения ===", error);
     throw error;

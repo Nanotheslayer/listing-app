@@ -212,18 +212,18 @@ impl G2GApiClient {
 
             // Server filter mapping (из Python скрипта)
             let server_filter = match server {
-                "EUW" | "Europe West" => "319340f0:65ec9642%7Ce80c30d1:304244a1",
-                "EUNE" | "Europe Nordic & East" => "319340f0:65ec9642%7Ce80c30d1:1a87dd85",
-                "NA" | "North America" | "NA1" => "319340f0:65ec9642%7Ce80c30d1:e2f2c55b",
+                "EUW" | "Europe West" => "e80c30d1:304244a1%7C319340f0:65ec9642",
+                "EUNE" | "Europe Nordic & East" => "e80c30d1:1a87dd85%7C319340f0:65ec9642",
+                "NA" | "North America" | "NA1" => "e80c30d1:e2f2c55b%7C319340f0:65ec9642",
                 "BR" | "BR1" | "Brazil" => "e80c30d1:31e5d298%7C319340f0:65ec9642",
-                "LAN" => "319340f0:65ec9642%7Ce80c30d1:302ba1e6",
-                "LAS" => "319340f0:65ec9642%7Ce80c30d1:d6ed5ab1",
-                "OCE" | "Oceania" => "319340f0:65ec9642%7Ce80c30d1:e35ad6c4",
-                "TR" | "Turkey" => "319340f0:65ec9642%7Ce80c30d1:5f8be29a",
+                "LAN" => "e80c30d1:302ba1e6%7C319340f0:65ec9642",
+                "LAS" => "e80c30d1:f28899f5%7C319340f0:65ec9642",
+                "OCE" | "Oceania" => "e80c30d1:5c030fef%7C319340f0:65ec9642",
+                "TR" | "Turkey" => "e80c30d1:2247e703%7C319340f0:65ec9642",
                 "RU" | "Russia" => "319340f0:65ec9642%7Ce80c30d1:d94d8d49",
-                "JP" | "Japan" => "319340f0:65ec9642%7Ce80c30d1:8b6a5b8e",
+                "JP" | "Japan" => "e80c30d1:e9926686%7C319340f0:65ec9642",
                 "KR" | "Korea" => "319340f0:65ec9642%7Ce80c30d1:a7bb0eb5",
-                _ => "319340f0:65ec9642%7Ce80c30d1:1a87dd85", // Default to EUNE
+                _ => "e80c30d1:1a87dd85%7C319340f0:65ec9642", // Default to EUNE
             };
 
             let encoded_skin = urlencoding::encode(skin_name);

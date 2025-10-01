@@ -6,6 +6,7 @@
   import { accountManager, type Account } from "../../../lib/accounts";
   import { autofillListing, parseAccountData, readPersonalInfo } from "../../../lib/parser";
   import { onMount, onDestroy } from "svelte";
+  import { trackChampionUsage, getChampionUsageStats } from "../../../lib/championTracking";
 
   // Интерфейсы для API ответов
   interface SkinPrice {
@@ -122,20 +123,24 @@
       const result = await autofillListing(account.path, files);
 
       console.log("Шаг 3: Получен результат");
-      console.log("Результат автозаполнения:", result);
       console.log("Заголовок:", result.title);
-      console.log("Длина заголовка:", result.title.length);
-      console.log("Описание (первые 200 символов):", result.description.substring(0, 200));
-      console.log("Длина описания:", result.description.length);
+      console.log("Использованные чемпионы:", result.usedChampions); // 👈 НОВОЕ
+
+      // 👇 НОВОЕ: Сохраняем статистику использования чемпионов
+      if (result.usedChampions && result.usedChampions.length > 0) {
+        trackChampionUsage(result.usedChampions);
+        console.log(`📊 Сохранено использование ${result.usedChampions.length} чемпионов`);
+
+        // Показываем текущую статистику (для отладки)
+        const stats = getChampionUsageStats();
+        console.log("📈 Топ-5 редко используемых чемпионов:");
+        stats.slice(0, 5).forEach(s => console.log(`  ${s.champion}: ${s.count} раз(а)`));
+      }
 
       // Присваиваем значения
       console.log("Шаг 4: Присваиваем значения полям...");
       title = result.title;
       description = result.description;
-
-      console.log("Шаг 5: Значения присвоены");
-      console.log("title переменная:", title);
-      console.log("description переменная (первые 100 символов):", description.substring(0, 100));
 
       console.log("=== АВТОЗАПОЛНЕНИЕ ЗАВЕРШЕНО УСПЕШНО ===");
 
@@ -147,15 +152,7 @@
       }, 3000);
     } catch (error) {
       console.error("=== ОШИБКА АВТОЗАПОЛНЕНИЯ ===");
-      console.error("Тип ошибки:", typeof error);
       console.error("Ошибка:", error);
-
-      if (error instanceof Error) {
-        console.error("Сообщение:", error.message);
-        console.error("Stack trace:", error.stack);
-      } else {
-        console.error("Не-Error объект:", String(error));
-      }
 
       statusMessage = `Ошибка: ${error instanceof Error ? error.message : String(error)}`;
       messageType = "error";

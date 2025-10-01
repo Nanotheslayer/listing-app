@@ -3,6 +3,11 @@
 .env.*
 !.env.example
 .env.example
+node_modules/
+src-tauri/target/
+.svelte-kit/
+build/
+dist/
 
 # API keys and secrets (ВАЖНО!)
 **/api-keys.json
