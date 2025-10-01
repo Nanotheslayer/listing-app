@@ -2,6 +2,7 @@
   import { accountManager, type Account } from "../lib/accounts";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
+  import SettingsWarning from "../lib/components/SettingsWarning.svelte";
 
   let loading = $state(false);
   let statusMessage = $state("");
@@ -128,6 +129,18 @@
           </p>
         {/if}
       </div>
+
+      <div class="flex gap-3">
+        <!-- Кнопка настроек -->
+        <button
+          onclick={() => goto('/settings')}
+          class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold rounded-lg transition-all duration-200 flex items-center gap-2 border border-gray-700 hover:border-gray-600"
+          title="Настройки"
+        >
+          <span>⚙️</span>
+          <span>Настройки</span>
+        </button>
+
       <button
         onclick={loadAccounts}
         disabled={loading}
@@ -144,6 +157,11 @@
           <span>Загрузить аккаунты</span>
         {/if}
       </button>
+    </div>
+    </div>
+
+    <div class="max-w-6xl mx-auto">
+      <SettingsWarning />
     </div>
 
     {#if statusMessage}

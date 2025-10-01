@@ -7,6 +7,8 @@
   import { autofillListing, parseAccountData, readPersonalInfo } from "../../../lib/parser";
   import { onMount, onDestroy } from "svelte";
   import { trackChampionUsage, getChampionUsageStats } from "../../../lib/championTracking";
+  import { ensureG2GSettings } from "../../../lib/settings";
+  import { settingsManager } from "../../../lib/settings";
 
   // Интерфейсы для API ответов
   interface SkinPrice {
@@ -55,6 +57,9 @@
   let showInGameInfo = $state(false);
   let loadingInGameInfo = $state(false);
 
+  let hasG2GSettings = $state(false);
+  let checkingSettings = $state(true);
+
   // Счетчики символов
   const MAX_TITLE_LENGTH = 128;
   const MAX_DESCRIPTION_LENGTH = 5000;
@@ -74,6 +79,9 @@
       setTimeout(() => goBack(), 2000);
       return;
     }
+
+    hasG2GSettings = await settingsManager.hasG2GSettings();
+    checkingSettings = false;
 
     // Подписываемся на события прогресса
     unsubscribeProgress = await listen<PriceProgress>("price-progress", (event) => {
@@ -175,6 +183,8 @@
     messageType = "info";
 
     try {
+      await ensureG2GSettings();
+
       // Шаг 1: Получаем файлы аккаунта
       console.log("Получение файлов аккаунта...");
       const files = await accountManager.getAccountFiles(accountId);
@@ -238,14 +248,27 @@ ${priceLines}
     } catch (error) {
       console.error("Ошибка расчета цен:", error);
 
-      skinsPriceInfo = `❌ Ошибка получения цен:\n${error instanceof Error ? error.message : String(error)}`;
+      // 👇 ОБНОВИТЬ ОБРАБОТКУ ОШИБОК
+      if (error instanceof Error && error.message.includes("токены не настроены")) {
+        skinsPriceInfo = `❌ ${error.message}`;
+        statusMessage = error.message;
+        messageType = "error";
 
-      statusMessage = `Ошибка расчета: ${error instanceof Error ? error.message : String(error)}`;
-      messageType = "error";
+        // Предложить перейти в настройки через 3 секунды
+        setTimeout(() => {
+          if (confirm("Перейти в настройки для указания токенов?")) {
+            goto("/settings");
+          }
+        }, 3000);
+      } else {
+        skinsPriceInfo = `❌ Ошибка получения цен:\n${error.message}`;
+        statusMessage = `Ошибка расчета: ${error.message}`;
+        messageType = "error";
+      }
 
       setTimeout(() => {
         statusMessage = "";
-      }, 3000);
+      }, 5000);
     } finally {
       loading = false;
       isCalculatingPrices = false;
@@ -420,6 +443,8 @@ ${priceLines}
     messageType = "info";
 
     try {
+      await ensureG2GSettings();
+
       // Получаем данные аккаунта
       const files = await accountManager.getAccountFiles(accountId);
       const accountData = await parseAccountData(account.path, files);
@@ -459,8 +484,21 @@ ${priceLines}
     } catch (error) {
       console.error("Ошибка выставления:", error);
       accountManager.updateAccountStatus(accountId, "error");
-      statusMessage = `Ошибка выставления: ${error instanceof Error ? error.message : String(error)}`;
-      messageType = "error";
+
+      // 👇 ОБНОВИТЬ ОБРАБОТКУ ОШИБОК
+      if (error instanceof Error && error.message.includes("токены не настроены")) {
+        statusMessage = error.message;
+        messageType = "error";
+
+        setTimeout(() => {
+          if (confirm("Перейти в настройки для указания токенов?")) {
+            goto("/settings");
+          }
+        }, 3000);
+      } else {
+        statusMessage = `Ошибка выставления: ${error instanceof Error ? error.message : String(error)}`;
+        messageType = "error";
+      }
 
       setTimeout(() => {
         statusMessage = "";
@@ -544,6 +582,33 @@ ${priceLines}
         </button>
       </div>
     </div>
+
+        {#if !checkingSettings && !hasG2GSettings}
+      <div class="max-w-5xl mx-auto mb-6">
+        <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-6">
+          <div class="flex items-start gap-4">
+            <div class="flex-shrink-0 w-12 h-12 rounded-full bg-yellow-500/20 flex items-center justify-center">
+              <span class="text-3xl">⚠️</span>
+            </div>
+            <div class="flex-1">
+              <h3 class="text-yellow-400 font-bold text-lg mb-2">
+                G2G токены не настроены
+              </h3>
+              <p class="text-gray-300 mb-4">
+                Для расчета цен скинов и выставления аккаунта на G2G необходимо указать токены в настройках.
+              </p>
+              <button
+                onclick={() => goto("/settings")}
+                class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+              >
+                <span>⚙️</span>
+                <span>Перейти в настройки</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <!-- Статус сообщение -->
     {#if statusMessage}
@@ -644,8 +709,9 @@ ${priceLines}
           <!-- Кнопка выставления -->
           <button
             onclick={listAccount}
-            disabled={loading || !title.trim() || !description.trim() || !price || parseFloat(price) <= 0}
+            disabled={loading || !title.trim() || !description.trim() || !price || parseFloat(price) <= 0 || !hasG2GSettings}
             class="w-full py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl transition-all duration-200 shadow-lg hover:shadow-green-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-3 text-lg"
+            title={!hasG2GSettings ? "Настройте G2G токены в настройках" : ""}
           >
             {#if loading}
               <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
@@ -718,8 +784,9 @@ ${priceLines}
 
             <button
               onclick={calculatePrices}
-              disabled={loading || isCalculatingPrices}
+              disabled={loading || isCalculatingPrices || !hasG2GSettings}
               class="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-lg transition-all duration-200 shadow-lg hover:shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              title={!hasG2GSettings ? "Настройте G2G токены в настройках" : ""}
             >
               {#if isCalculatingPrices}
                 <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">

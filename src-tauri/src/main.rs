@@ -13,12 +13,28 @@ mod g2g_api;
 mod config;
 
 use g2g_api::{G2GApiClient, G2GAuthTokens, SkinPrice};
-use config::G2GConfig;
+use config::{AppSettings, G2GSettings};
 
-// Global API client and config
+// Global API client (без g2g_config)
 struct AppState {
     g2g_client: Mutex<G2GApiClient>,
-    g2g_config: G2GConfig,
+}
+
+// Функция для загрузки настроек G2G
+fn load_g2g_settings() -> Result<G2GSettings, String> {
+    match AppSettings::load() {
+        Ok(settings) => {
+            println!("✅ G2G settings loaded from file");
+            Ok(settings.g2g)
+        }
+        Err(_) => {
+            // Fallback на .env
+            config::load_from_env()
+                .ok_or_else(|| {
+                    "G2G токены не настроены. Перейдите в настройки приложения.".to_string()
+                })
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,7 +107,6 @@ fn check_if_listed(account_path: &str) -> bool {
     if let Ok(entries) = fs::read_dir(account_path) {
         for entry in entries.flatten() {
             if let Some(filename) = entry.file_name().to_str() {
-                // Проверяем, начинается ли имя файла с "G17" и заканчивается на .txt
                 if filename.starts_with("G17") && filename.ends_with(".txt") {
                     println!("   ✓ Found offer file: {}", filename);
                     return true;
@@ -112,14 +127,17 @@ async fn create_g2g_offer(
     println!("   Server: {}", request.server);
     println!("   Account path: {}", request.account_path);
 
+    // Загружаем настройки динамически
+    let g2g_settings = load_g2g_settings()
+        .map_err(|e| format!("Не удалось загрузить настройки G2G: {}", e))?;
+
     let tokens = G2GAuthTokens {
-        user_id: state.g2g_config.user_id.clone(),
-        refresh_token: state.g2g_config.refresh_token.clone(),
-        long_lived_token: state.g2g_config.long_lived_token.clone(),
-        active_device_token: state.g2g_config.active_device_token.clone(),
+        user_id: g2g_settings.user_id.clone(),
+        refresh_token: g2g_settings.refresh_token.clone(),
+        long_lived_token: g2g_settings.long_lived_token.clone(),
+        active_device_token: g2g_settings.active_device_token.clone(),
     };
 
-    // Читаем файл с данными аккаунта
     let account_file = format!("{}.txt", request.account_name);
     let account_path = PathBuf::from(&request.account_path);
     let file_path = account_path.join(&account_file);
@@ -135,7 +153,6 @@ async fn create_g2g_offer(
 
     println!("✅ Account data loaded, {} bytes", raw_content.len());
 
-    // Извлекаем ссылку на скриншот
     let screenshot_url = extract_screenshot_url(&raw_content);
     if let Some(ref url) = screenshot_url {
         println!("🖼️  Found screenshot URL: {}", url);
@@ -143,7 +160,6 @@ async fn create_g2g_offer(
         println!("⚠️  No screenshot URL found in account file");
     }
 
-    // Парсим в CSV формат
     let csv_data = parse_account_to_csv(&raw_content)
         .map_err(|e| format!("Failed to parse account to CSV: {}", e))?;
 
@@ -166,7 +182,6 @@ async fn create_g2g_offer(
 
     println!("✅ Offer created with data! ID: {}", offer_id);
 
-    // Сохраняем offer_id в файл в папке аккаунта
     save_offer_id_to_file(&request.account_path, &offer_id)?;
 
     Ok(offer_id)
@@ -178,13 +193,10 @@ fn extract_screenshot_url(text: &str) -> Option<String> {
     for line in text.lines() {
         let line = line.trim();
 
-        // Ищем строку со "Screenshot URL"
         if line.to_lowercase().contains("screenshot url") {
             println!("   Found line with 'screenshot url': {}", line);
 
-            // Ищем любой URL в этой строке (http или https)
             if let Some(http_pos) = line.find("http") {
-                // Берём всё от http до конца строки или до пробела
                 let url_part = &line[http_pos..];
                 let url = url_part.split_whitespace().next().unwrap_or(url_part);
 
@@ -193,14 +205,12 @@ fn extract_screenshot_url(text: &str) -> Option<String> {
             }
         }
 
-        // Также проверяем прямые ссылки на изображения
         if line.starts_with("http") &&
            (line.contains("imgur.com") ||
             line.contains("gyazo.com") ||
             line.contains("prnt.sc") ||
             line.contains("i.postimg.cc")) {
 
-            // Берём только URL без лишнего текста
             let url = line.split_whitespace().next().unwrap_or(line);
             println!("✅ Found direct image URL: {}", url);
             return Some(url.to_string());
@@ -237,14 +247,12 @@ async fn load_account_folders(folder_path: String) -> Result<AccountsData, Strin
                             if let Some(folder_name) = entry_path.file_name() {
                                 if let Some(name_str) = folder_name.to_str() {
                                     let path_str = entry_path.to_string_lossy().to_string();
-
-                                    // Проверяем статус
                                     let is_listed = check_if_listed(&path_str);
 
                                     accounts.push(AccountFolder {
                                         name: name_str.to_string(),
                                         path: path_str,
-                                        is_listed,  // ← Новое поле
+                                        is_listed,
                                     });
                                 }
                             }
@@ -350,7 +358,6 @@ async fn open_account_screenshot(account_path: String) -> Result<(), String> {
         return Err("Папка аккаунта не найдена".to_string());
     }
 
-    // Ищем первый .png файл
     match fs::read_dir(&path) {
         Ok(entries) => {
             for entry in entries {
@@ -359,7 +366,6 @@ async fn open_account_screenshot(account_path: String) -> Result<(), String> {
                     if entry_path.is_file() {
                         if let Some(ext) = entry_path.extension() {
                             if ext.to_str() == Some("png") {
-                                // Открываем файл через системное приложение
                                 let path_str = entry_path.to_string_lossy().to_string();
 
                                 println!("Found PNG file: {}", path_str);
@@ -410,11 +416,15 @@ async fn fetch_skin_prices(
     let total_skins = request.skins.len();
     println!("Fetching prices for {} skins on server {}", total_skins, request.server);
 
+    // Загружаем настройки динамически
+    let g2g_settings = load_g2g_settings()
+        .map_err(|e| format!("Не удалось загрузить настройки G2G: {}", e))?;
+
     let tokens = G2GAuthTokens {
-        user_id: state.g2g_config.user_id.clone(),
-        refresh_token: state.g2g_config.refresh_token.clone(),
-        long_lived_token: state.g2g_config.long_lived_token.clone(),
-        active_device_token: state.g2g_config.active_device_token.clone(),
+        user_id: g2g_settings.user_id.clone(),
+        refresh_token: g2g_settings.refresh_token.clone(),
+        long_lived_token: g2g_settings.long_lived_token.clone(),
+        active_device_token: g2g_settings.active_device_token.clone(),
     };
 
     let mut prices = Vec::new();
@@ -501,10 +511,17 @@ async fn fetch_skin_prices(
 }
 
 #[tauri::command]
-fn get_g2g_config_status(state: tauri::State<'_, AppState>) -> Result<bool, String> {
-    state.g2g_config.validate()
-        .map(|_| true)
-        .map_err(|e| format!("Config validation failed: {}", e))
+fn get_g2g_config_status() -> Result<bool, String> {
+    match load_g2g_settings() {
+        Ok(settings) => {
+            settings.validate()
+                .map(|_| true)
+                .map_err(|e| format!("Настройки невалидны: {}", e))
+        }
+        Err(_) => {
+            Ok(false)
+        }
+    }
 }
 
 #[tauri::command]
@@ -528,7 +545,10 @@ async fn create_listing(
     println!("📋 Creating listing - received personal_info:");
     println!("   Length: {} chars", personal_info.len());
 
-    // Извлекаем ссылку на скриншот
+    // Загружаем настройки динамически
+    let g2g_settings = load_g2g_settings()
+        .map_err(|e| format!("Не удалось загрузить настройки G2G: {}", e))?;
+
     let screenshot_url = extract_screenshot_url(&personal_info);
     if let Some(ref url) = screenshot_url {
         println!("🖼️  Found screenshot URL: {}", url);
@@ -543,10 +563,10 @@ async fn create_listing(
     println!("   CSV length: {} bytes", csv_data.len());
 
     let tokens = G2GAuthTokens {
-        user_id: state.g2g_config.user_id.clone(),
-        refresh_token: state.g2g_config.refresh_token.clone(),
-        long_lived_token: state.g2g_config.long_lived_token.clone(),
-        active_device_token: state.g2g_config.active_device_token.clone(),
+        user_id: g2g_settings.user_id.clone(),
+        refresh_token: g2g_settings.refresh_token.clone(),
+        long_lived_token: g2g_settings.long_lived_token.clone(),
+        active_device_token: g2g_settings.active_device_token.clone(),
     };
 
     let mut client = state.g2g_client.lock().await;
@@ -560,13 +580,12 @@ async fn create_listing(
         champions_count,
         skins_count,
         &csv_data,
-        screenshot_url.as_deref(),  // ← Передаём скриншот
+        screenshot_url.as_deref(),
         &tokens,
     ).await?;
 
     println!("✅ Offer created! ID: {}", offer_id);
 
-    // Сохраняем offer_id в файл
     save_offer_id_to_file(&account_path, &offer_id)?;
 
     Ok(offer_id)
@@ -626,15 +645,11 @@ fn parse_account_to_csv(text: &str) -> Result<String, String> {
         ));
     }
 
-    // КРИТИЧЕСКИ ВАЖНО: Правильное форматирование CSV
-    // В CSV, кавычки внутри кавычек должны быть удвоены ("" вместо ")
-    // И используем реальные переносы строк, а не \n
     let description_csv_safe = description_block
-        .replace("\"", "\"\"")  // Кавычки -> двойные кавычки (стандарт CSV)
-        .replace("\r\n", "\n")  // Нормализуем переносы строк
-        .replace("\r", "\n");   // Нормализуем переносы строк
+        .replace("\"", "\"\"")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n");
 
-    // CSV формат с реальными переносами строк в description
     let csv_line = format!(
         "{},{},,,,,,,,{},{},\"{}\"\r\n",
         login,
@@ -644,7 +659,6 @@ fn parse_account_to_csv(text: &str) -> Result<String, String> {
         description_csv_safe
     );
 
-    // Проверка
     let comma_count = csv_line.matches(',').count();
     println!("✅ CSV created with {} commas", comma_count);
     println!("   First 200 chars: {}", &csv_line[..csv_line.len().min(200)]);
@@ -652,28 +666,58 @@ fn parse_account_to_csv(text: &str) -> Result<String, String> {
     Ok(csv_line)
 }
 
-fn main() {
-    let g2g_config = match G2GConfig::from_env() {
-        Ok(config) => {
-            println!("G2G configuration loaded successfully");
-            if let Err(e) = config.validate() {
-                eprintln!("Warning: G2G config validation failed: {}", e);
-            }
-            config
+// Команды настроек
+#[tauri::command]
+async fn load_settings() -> Result<AppSettings, String> {
+    println!("📖 Loading settings from file...");
+
+    match AppSettings::load() {
+        Ok(settings) => {
+            println!("✅ Settings loaded successfully");
+            Ok(settings)
         }
         Err(e) => {
-            eprintln!("Error loading G2G configuration: {}", e);
-            eprintln!("Please create a .env file with G2G tokens");
-            eprintln!("See .env.example for reference");
+            println!("⚠️ Failed to load settings: {}", e);
 
-            G2GConfig {
-                user_id: String::new(),
-                refresh_token: String::new(),
-                long_lived_token: String::new(),
-                active_device_token: String::new(),
+            if let Some(g2g_settings) = config::load_from_env() {
+                println!("✅ Loaded G2G settings from .env (fallback)");
+                Ok(AppSettings {
+                    g2g: g2g_settings,
+                    theme: None,
+                })
+            } else {
+                Err(e)
             }
         }
-    };
+    }
+}
+
+#[tauri::command]
+async fn save_settings(settings: AppSettings) -> Result<(), String> {
+    println!("💾 Saving settings to file...");
+    println!("   User ID: {}", settings.g2g.user_id);
+
+    settings.save()?;
+
+    println!("✅ Settings saved successfully!");
+    Ok(())
+}
+
+#[tauri::command]
+async fn clear_settings() -> Result<(), String> {
+    println!("🗑️ Clearing settings...");
+    AppSettings::clear()?;
+    println!("✅ Settings cleared!");
+    Ok(())
+}
+
+#[tauri::command]
+fn settings_exist() -> bool {
+    AppSettings::exists()
+}
+
+fn main() {
+    // Не загружаем настройки при старте - они будут загружаться динамически
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -681,7 +725,6 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .manage(AppState {
             g2g_client: Mutex::new(G2GApiClient::new()),
-            g2g_config,
         })
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -693,7 +736,11 @@ fn main() {
             get_g2g_config_status,
             open_account_screenshot,
             create_g2g_offer,
-            create_listing
+            create_listing,
+            load_settings,
+            save_settings,
+            clear_settings,
+            settings_exist,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
