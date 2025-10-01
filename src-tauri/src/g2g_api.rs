@@ -56,6 +56,28 @@ pub struct G2GApiClient {
     session_id: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateJobRequest {
+    pub offer_id: String,
+    pub relation_id: String,
+    pub seller_id: String,
+    pub file_type: String,
+    pub files: Vec<String>,
+    pub brand_id: String,
+    pub service_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CreateJobResponse {
+    code: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExternalImage {
+    pub image_name: String,
+    pub image_url: String,
+}
+
 impl G2GApiClient {
     pub fn new() -> Self {
         // Генерируем случайный session_id
@@ -343,5 +365,538 @@ impl G2GApiClient {
                 Ok(format!("${:.2}", min_price))
             }
         })
+    }
+}
+
+// Структуры для создания оффера
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OfferAttribute {
+    pub collection_id: String,
+    pub dataset_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateOfferRequest {
+    pub service_id: String,
+    pub brand_id: String,
+    pub offer_type: String,
+    pub seller_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CreateOfferResponse {
+    code: i32,
+    payload: CreateOfferPayload,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CreateOfferPayload {
+    offer_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateOfferRequest {
+    pub seller_id: String,
+    pub offer_id: String,
+    pub delivery_method_ids: Vec<String>,
+    pub delivery_speed: String,
+    pub delivery_speed_details: Vec<DeliverySpeed>,
+    pub qty: i32,
+    pub currency: String,
+    pub min_qty: i32,
+    pub low_stock_alert_qty: i32,
+    pub sales_territory_settings: SalesTerritory,
+    pub title: String,
+    pub description: String,
+    pub offer_attributes: Vec<OfferAttribute>,
+    pub external_images_mapping: Vec<ExternalImage>,
+    pub unit_price: f64,
+    pub other_pricing: Vec<String>,
+    pub wholesale_details: Vec<String>,
+    pub other_wholesale_details: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeliverySpeed {
+    pub min: i32,
+    pub max: i32,
+    pub delivery_time: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SalesTerritory {
+    pub settings_type: String,
+    pub countries: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UpdateOfferResponse {
+    code: i32,
+    #[serde(default)]
+    payload: Option<UpdateOfferPayload>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UpdateOfferPayload {
+    relation_id: String,
+    // остальные поля опциональны
+    #[serde(default)]
+    offer_id: Option<String>,
+}
+
+impl G2GApiClient {
+    // Создать пустой оффер и получить ID
+    pub async fn create_offer_id(&mut self, tokens: &G2GAuthTokens) -> Result<String, String> {
+        println!("📝 Creating empty offer to get ID...");
+
+        // Ensure we have a valid token
+        if self.current_token.is_none() {
+            println!("🔑 No token available, refreshing...");
+            self.refresh_token(tokens).await?;
+        }
+
+        let url = format!("{}/offer", self.base_url);
+
+        let request = CreateOfferRequest {
+            service_id: "f6a1aba5-473a-4044-836a-8968bbab16d7".to_string(),
+            brand_id: "lgc_game_22666".to_string(),
+            offer_type: "public".to_string(),
+            seller_id: tokens.user_id.clone(),
+        };
+
+        let headers = self.get_browser_headers(true);
+
+        let response = self.client
+            .post(&url)
+            .headers(headers)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to create offer: {}", e))?;
+
+        let status = response.status();
+        println!("📥 Create offer response status: {}", status);
+
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_else(|_| "Unable to read error".to_string());
+            return Err(format!("Failed to create offer: {} - {}", status, error_body));
+        }
+
+        let json: CreateOfferResponse = response.json().await
+            .map_err(|e| format!("Failed to parse create offer response: {}", e))?;
+
+        println!("✅ Offer ID created: {}", json.payload.offer_id);
+        Ok(json.payload.offer_id)
+    }
+
+    // Обновить оффер с полными данными
+    pub async fn update_offer(
+        &mut self,
+        offer_id: &str,
+        title: &str,
+        description: &str,
+        price: f64,
+        server: &str,
+        rank: &str,
+        champions_count: i32,
+        skins_count: i32,
+        screenshot_url: Option<&str>,
+        tokens: &G2GAuthTokens,
+    ) -> Result<String, String> {
+        println!("📄 Updating offer {} with data...", offer_id);
+
+        let url = format!("{}/offer/{}", self.base_url, offer_id);
+
+        let offer_attributes = self.create_offer_attributes(server, rank, champions_count, skins_count);
+
+        // Формируем массив изображений
+        let external_images = if let Some(url) = screenshot_url {
+            vec![ExternalImage {
+                image_name: "1".to_string(),
+                image_url: url.to_string(),
+            }]
+        } else {
+            vec![]
+        };
+
+        let request = UpdateOfferRequest {
+            seller_id: tokens.user_id.clone(),
+            offer_id: offer_id.to_string(),
+            delivery_method_ids: vec![],
+            delivery_speed: "instant".to_string(),
+            delivery_speed_details: vec![],
+            qty: 1,
+            currency: "USD".to_string(),
+            min_qty: 1,
+            low_stock_alert_qty: 0,
+            sales_territory_settings: SalesTerritory {
+                settings_type: "global".to_string(),
+                countries: vec![],
+            },
+            title: title.to_string(),
+            description: description.to_string(),
+            offer_attributes,
+            external_images_mapping: external_images,  // ← Теперь эта переменная существует
+            unit_price: price,
+            other_pricing: vec![],
+            wholesale_details: vec![],
+            other_wholesale_details: vec![],
+        };
+
+        let headers = self.get_browser_headers(true);
+
+        let response = self.client
+            .put(&url)
+            .headers(headers)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to update offer: {}", e))?;
+
+        let status = response.status();
+        println!("📥 Update offer response status: {}", status);
+
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_else(|_| "Unable to read error".to_string());
+            return Err(format!("Failed to update offer: {} - {}", status, error_body));
+        }
+
+        let bytes = response.bytes().await
+            .map_err(|e| format!("Failed to read response bytes: {}", e))?;
+
+        let decoded_bytes = if bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
+            println!("🗜️ Decompressing gzip response...");
+            let mut decoder = GzDecoder::new(&bytes[..]);
+            let mut decoded = Vec::new();
+            decoder.read_to_end(&mut decoded)
+                .map_err(|e| format!("Failed to decompress gzip: {}", e))?;
+            decoded
+        } else {
+            bytes.to_vec()
+        };
+
+        let response_text = String::from_utf8_lossy(&decoded_bytes);
+        println!("📄 Update offer response body: {}", response_text);
+
+        let json: UpdateOfferResponse = serde_json::from_slice(&decoded_bytes)
+            .map_err(|e| format!("Failed to parse update response: {}", e))?;
+
+        if json.code != 2000 {
+            return Err(format!("Update offer returned code: {}", json.code));
+        }
+
+        let relation_id = json.payload
+            .ok_or("No payload in update response")?
+            .relation_id;
+
+        println!("✅ Offer updated successfully! Relation ID: {}", relation_id);
+        Ok(relation_id)
+    }
+
+    // Новая функция для загрузки softpin данных
+    pub async fn upload_softpin_data(
+        &mut self,
+        offer_id: &str,
+        relation_id: &str,
+        softpin_content: &str,
+        tokens: &G2GAuthTokens,
+    ) -> Result<(), String> {
+        println!("📤 Uploading softpin...");
+        println!("🔍 Softpin content length: {}", softpin_content.len());
+        println!("🔍 First 300 chars: {}", &softpin_content[..softpin_content.len().min(300)]);
+
+        let url = format!("{}/inventory/softpin", self.base_url);
+
+        // Используем serde_json для правильной сериализации
+        let request_body = serde_json::json!({
+            "offer_id": offer_id,
+            "relation_id": relation_id,
+            "softpin": softpin_content,  // serde_json автоматически экранирует правильно
+            "seller_id": tokens.user_id
+        });
+
+        let json_body = serde_json::to_string(&request_body)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?;
+
+        println!("📤 Final JSON length: {}", json_body.len());
+        println!("📤 JSON preview (first 500 chars):");
+        println!("{}", &json_body[..json_body.len().min(500)]);
+
+        let headers = self.get_browser_headers(true);
+
+        let response = self.client
+            .post(&url)
+            .headers(headers)
+            .header("content-type", "application/json")
+            .body(json_body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to upload softpin: {}", e))?;
+
+        let status = response.status();
+        println!("📥 Response status: {}", status);
+
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_else(|_| "Unable to read".to_string());
+            return Err(format!("Upload failed {}: {}", status, error_body));
+        }
+
+        let bytes = response.bytes().await.map_err(|e| format!("Read error: {}", e))?;
+        let decoded_bytes = if bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
+            let mut decoder = GzDecoder::new(&bytes[..]);
+            let mut decoded = Vec::new();
+            decoder.read_to_end(&mut decoded).map_err(|e| format!("Decompress error: {}", e))?;
+            decoded
+        } else {
+            bytes.to_vec()
+        };
+
+        let response_text = String::from_utf8_lossy(&decoded_bytes);
+        println!("📄 Response: {}", response_text);
+
+        let json: serde_json::Value = serde_json::from_slice(&decoded_bytes)
+            .map_err(|e| format!("Parse error: {}", e))?;
+
+        if json["code"].as_i64() != Some(2000) {
+            return Err(format!("Failed with code: {}", json["code"]));
+        }
+
+        println!("✅ Softpin uploaded!");
+        Ok(())
+    }
+
+    // Загрузить данные аккаунта (softpin) и создать job
+    pub async fn upload_account_data(
+        &mut self,
+        offer_id: &str,
+        relation_id: &str,
+        softpin_content: &str,
+        tokens: &G2GAuthTokens,
+    ) -> Result<(), String> {
+        println!("📦 Processing account data for offer {}...", offer_id);
+
+        // Шаг 1: Загрузить softpin данные
+        self.upload_softpin_data(offer_id, relation_id, softpin_content, tokens).await?;
+
+        // Задержка между запросами
+        let delay_ms = rand::thread_rng().gen_range(500..1000);
+        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+
+        // Шаг 2: Создать job для обработки
+        println!("📋 Creating processing job...");
+
+        let job_url = format!("{}/inventory/job", self.base_url);
+
+        // Генерируем имя CSV файла
+        let csv_filename = format!("{}/{}.csv", offer_id, offer_id);
+
+        let job_request = serde_json::json!({
+            "offer_id": offer_id,
+            "relation_id": relation_id,
+            "seller_id": tokens.user_id,
+            "file_type": "csv",
+            "files": [csv_filename],
+            "brand_id": "lgc_game_22666",
+            "service_id": "f6a1aba5-473a-4044-836a-8968bbab16d7",
+        });
+
+        println!("📤 Job request body: {}", serde_json::to_string_pretty(&job_request).unwrap());
+
+        let headers = self.get_browser_headers(true);
+
+        let response = self.client
+            .post(&job_url)
+            .headers(headers)
+            .json(&job_request)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to create job: {}", e))?;
+
+        let status = response.status();
+        println!("📥 Create job response status: {}", status);
+
+        let bytes = response.bytes().await
+            .map_err(|e| format!("Failed to read job response bytes: {}", e))?;
+
+        let decoded_bytes = if bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
+            let mut decoder = GzDecoder::new(&bytes[..]);
+            let mut decoded = Vec::new();
+            decoder.read_to_end(&mut decoded)
+                .map_err(|e| format!("Failed to decompress: {}", e))?;
+            decoded
+        } else {
+            bytes.to_vec()
+        };
+
+        let response_text = String::from_utf8_lossy(&decoded_bytes);
+        println!("📄 Job response body: {}", response_text);
+
+        if !status.is_success() {
+            return Err(format!("Job creation failed with status {}: {}", status, response_text));
+        }
+
+        let job_json: serde_json::Value = serde_json::from_slice(&decoded_bytes)
+            .map_err(|e| format!("Failed to parse job response: {}", e))?;
+
+        if job_json["code"].as_i64() == Some(2000) {
+            println!("✅ Account data processing job created successfully!");
+            Ok(())
+        } else {
+            Err(format!("Create job returned code: {}", job_json["code"]))
+        }
+    }
+
+
+    // Создать полный оффер с загрузкой данных (трехстапный процесс)
+    pub async fn create_full_offer_with_data(
+        &mut self,
+        title: &str,
+        description: &str,
+        price: f64,
+        server: &str,
+        rank: &str,
+        champions_count: i32,
+        skins_count: i32,
+        softpin_content: &str,
+        screenshot_url: Option<&str>,
+        tokens: &G2GAuthTokens,
+    ) -> Result<String, String> {
+        println!("🎯 Starting full offer creation with data upload...");
+
+        // Шаг 1: Создать пустой оффер
+        let offer_id = self.create_offer_id(tokens).await?;
+
+        let delay_ms = rand::thread_rng().gen_range(1500..2500);
+        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+
+        // Шаг 2: Обновить оффер и получить relation_id
+        let relation_id = self.update_offer(
+            &offer_id,
+            title,
+            description,
+            price,
+            server,
+            rank,
+            champions_count,
+            skins_count,
+            screenshot_url,
+            tokens,
+        ).await?;
+
+        let delay_ms = rand::thread_rng().gen_range(1500..2500);
+        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+
+        // Шаг 3: Загрузить данные аккаунта используя relation_id
+        self.upload_account_data(&offer_id, &relation_id, softpin_content, tokens).await?;
+
+        println!("🎉 Full offer with data created successfully! ID: {}", offer_id);
+        Ok(offer_id)
+    }
+
+    // Вспомогательные функции маппинга
+    fn get_server_id(&self, server: &str) -> &str {
+        match server.to_uppercase().as_str() {
+            "EUNE" => "1a87dd85",
+            "EUW" => "304244a1",
+            "NA" | "NA1" => "e2f2c55b",
+            "BR" | "BR1" => "31e5d298",
+            "LAN" => "302ba1e6",
+            "LAS" => "d6ed5ab1",
+            "OCE" => "e35ad6c4",
+            "TR" => "5f8be29a",
+            "RU" => "d94d8d49",
+            "JP" => "8b6a5b8e",
+            "KR" => "a7bb0eb5",
+            _ => "1a87dd85", // Default EUNE
+        }
+    }
+
+    fn get_rank_id(&self, rank: &str) -> &str {
+        match rank {
+            "Unranked" | "Has games" => "dc514fdf",
+            "Iron" => "64174ec3",
+            "Bronze" => "bf08fd78",
+            "Silver" => "405dc68e",
+            "Gold" => "55077770",
+            "Platinum" => "8a193251",
+            "Emerald" => "297e3197",
+            "Diamond" => "3b06cc4c",
+            "Master" => "08f99b44",
+            "Grandmaster" => "447eb997",
+            "Challenger" => "99197149",
+            _ => "dc514fdf", // Default Unranked
+        }
+    }
+
+    fn get_champions_id(&self, count: i32) -> &str {
+        if count > 159 {
+            "3ee17abb"
+        } else if count > 129 {
+            "dc9b65bb"
+        } else if count > 99 {
+            "2ea03f75"
+        } else if count > 49 {
+            "7bbf537c"
+        } else if count > 29 {
+            "191cd6d7"
+        } else if count > 9 {
+            "b03ce3d1"
+        } else {
+            "b5d60c4b"
+        }
+    }
+
+    fn get_skins_id(&self, count: i32) -> &str {
+        if count > 999 {
+            "da83ec6e"
+        } else if count > 499 {
+            "32895a53"
+        } else if count > 299 {
+            "bbe13228"
+        } else if count > 99 {
+            "70f8019b"
+        } else if count > 49 {
+            "c1721794"
+        } else if count > 9 {
+            "4be5718c"
+        } else {
+            "ce97df6f"
+        }
+    }
+
+    fn create_offer_attributes(
+        &self,
+        server: &str,
+        rank: &str,
+        champions_count: i32,
+        skins_count: i32,
+    ) -> Vec<OfferAttribute> {
+        vec![
+            // Server
+            OfferAttribute {
+                collection_id: "e80c30d1".to_string(),
+                dataset_id: self.get_server_id(server).to_string(),
+            },
+            // Type (Account for League of Legends)
+            OfferAttribute {
+                collection_id: "319340f0".to_string(),
+                dataset_id: "65ec9642".to_string(),
+            },
+            // Rank
+            OfferAttribute {
+                collection_id: "eb7040e2".to_string(),
+                dataset_id: self.get_rank_id(rank).to_string(),
+            },
+            // Champions count
+            OfferAttribute {
+                collection_id: "04862150".to_string(),
+                dataset_id: self.get_champions_id(champions_count).to_string(),
+            },
+            // Skins count
+            OfferAttribute {
+                collection_id: "962f619a".to_string(),
+                dataset_id: self.get_skins_id(skins_count).to_string(),
+            },
+        ]
     }
 }

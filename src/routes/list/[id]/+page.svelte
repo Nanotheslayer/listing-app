@@ -423,35 +423,51 @@ ${priceLines}
     messageType = "info";
 
     try {
-      // TODO: Здесь будет реальная логика выставления аккаунта
-      console.log("Данные для выставления:", {
-        accountId: account.id,
-        accountPath: account.path,
-        title,
-        description,
-        price: `$${price}`,
-        skinsPriceInfo
+      // Получаем данные аккаунта
+      const files = await accountManager.getAccountFiles(accountId);
+      const accountData = await parseAccountData(account.path, files);
+
+      console.log("📊 Данные аккаунта для выставления:");
+      console.log("  Server:", accountData.server);
+      console.log("  Champions:", accountData.championsCount);
+      console.log("  Skins:", accountData.skinsCount);
+      console.log("  Account path:", account.path);
+      console.log("  Account name:", account.name);
+
+      // Вызываем Rust команду для создания оффера
+      const offerId = await invoke<string>("create_g2g_offer", {
+        request: {
+          title,
+          description,
+          price: parseFloat(price),
+          server: accountData.server,
+          rank: "Unranked",
+          champions_count: accountData.championsCount,
+          skins_count: accountData.skinsCount,
+          account_path: account.path,    // Путь к папке аккаунта
+          account_name: account.name      // Имя аккаунта (для файла {name}.txt)
+        }
       });
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log("✅ Оффер создан с загруженными данными! ID:", offerId);
 
-      // Обновляем статус в менеджере
       accountManager.updateAccountStatus(accountId, "listed");
 
-      statusMessage = "Аккаунт успешно выставлен на продажу!";
+      statusMessage = `Аккаунт успешно выставлен с данными! ID: ${offerId}`;
       messageType = "success";
 
       setTimeout(() => {
         goBack();
-      }, 2000);
+      }, 3000);
     } catch (error) {
+      console.error("Ошибка выставления:", error);
       accountManager.updateAccountStatus(accountId, "error");
-      statusMessage = `Ошибка выставления: ${error}`;
+      statusMessage = `Ошибка выставления: ${error instanceof Error ? error.message : String(error)}`;
       messageType = "error";
 
       setTimeout(() => {
         statusMessage = "";
-      }, 3000);
+      }, 5000);
     } finally {
       loading = false;
     }

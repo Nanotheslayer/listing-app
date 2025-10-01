@@ -45,12 +45,129 @@ pub struct SkinPriceResponse {
     pub most_expensive: Option<SkinPrice>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateOfferRequest {
+    pub title: String,
+    pub description: String,
+    pub price: f64,
+    pub server: String,
+    pub rank: String,
+    pub champions_count: i32,
+    pub skins_count: i32,
+    pub account_path: String,
+    pub account_name: String,
+}
+
 #[derive(Clone, serde::Serialize)]
 struct PriceProgressPayload {
     current: usize,
     total: usize,
     skin_name: String,
     status: String,
+}
+
+#[tauri::command]
+async fn create_g2g_offer(
+    request: CreateOfferRequest,
+    state: tauri::State<'_, AppState>
+) -> Result<String, String> {
+    println!("🎯 Creating G2G offer...");
+    println!("   Title: {}", request.title);
+    println!("   Server: {}", request.server);
+
+    let tokens = G2GAuthTokens {
+        user_id: state.g2g_config.user_id.clone(),
+        refresh_token: state.g2g_config.refresh_token.clone(),
+        long_lived_token: state.g2g_config.long_lived_token.clone(),
+        active_device_token: state.g2g_config.active_device_token.clone(),
+    };
+
+    // Читаем файл с данными аккаунта
+    let account_file = format!("{}.txt", request.account_name);
+    let account_path = PathBuf::from(&request.account_path);
+    let file_path = account_path.join(&account_file);
+
+    println!("📄 Reading account data from: {:?}", file_path);
+
+    let raw_content = match fs::read_to_string(&file_path) {
+        Ok(content) => content,
+        Err(e) => {
+            return Err(format!("Failed to read account data file: {}", e));
+        }
+    };
+
+    println!("✅ Account data loaded, {} bytes", raw_content.len());
+
+    // Извлекаем ссылку на скриншот
+    let screenshot_url = extract_screenshot_url(&raw_content);
+    if let Some(ref url) = screenshot_url {
+        println!("🖼️  Found screenshot URL: {}", url);
+    } else {
+        println!("⚠️  No screenshot URL found in account file");
+    }
+
+    // Парсим в CSV формат
+    let csv_data = parse_account_to_csv(&raw_content)
+        .map_err(|e| format!("Failed to parse account to CSV: {}", e))?;
+
+    println!("✅ Converted to CSV, {} bytes", csv_data.len());
+
+    let mut client = state.g2g_client.lock().await;
+
+    let offer_id = client.create_full_offer_with_data(
+        &request.title,
+        &request.description,
+        request.price,
+        &request.server,
+        &request.rank,
+        request.champions_count,
+        request.skins_count,
+        &csv_data,
+        screenshot_url.as_deref(),  // ← Добавили недостающий аргумент
+        &tokens,
+    ).await?;
+
+    println!("✅ Offer created with data! ID: {}", offer_id);
+    Ok(offer_id)
+}
+
+fn extract_screenshot_url(text: &str) -> Option<String> {
+    println!("🔍 Searching for screenshot URL in text...");
+
+    for line in text.lines() {
+        let line = line.trim();
+
+        // Ищем строку со "Screenshot URL"
+        if line.to_lowercase().contains("screenshot url") {
+            println!("   Found line with 'screenshot url': {}", line);
+
+            // Ищем любой URL в этой строке (http или https)
+            if let Some(http_pos) = line.find("http") {
+                // Берём всё от http до конца строки или до пробела
+                let url_part = &line[http_pos..];
+                let url = url_part.split_whitespace().next().unwrap_or(url_part);
+
+                println!("✅ Extracted screenshot URL: {}", url);
+                return Some(url.to_string());
+            }
+        }
+
+        // Также проверяем прямые ссылки на изображения
+        if line.starts_with("http") &&
+           (line.contains("imgur.com") ||
+            line.contains("gyazo.com") ||
+            line.contains("prnt.sc") ||
+            line.contains("i.postimg.cc")) {
+
+            // Берём только URL без лишнего текста
+            let url = line.split_whitespace().next().unwrap_or(line);
+            println!("✅ Found direct image URL: {}", url);
+            return Some(url.to_string());
+        }
+    }
+
+    println!("⚠️  No screenshot URL found in text");
+    None
 }
 
 #[tauri::command]
@@ -347,6 +464,141 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to G2G App!", name)
 }
 
+#[tauri::command]
+async fn create_listing(
+    title: String,
+    description: String,
+    price: f64,
+    server: String,
+    rank: String,
+    champions_count: i32,
+    skins_count: i32,
+    personal_info: String,
+    state: tauri::State<'_, AppState>
+) -> Result<String, String> {
+    println!("📋 Creating listing - received personal_info:");
+    println!("   Length: {} chars", personal_info.len());
+
+    // Извлекаем ссылку на скриншот
+    let screenshot_url = extract_screenshot_url(&personal_info);
+    if let Some(ref url) = screenshot_url {
+        println!("🖼️  Found screenshot URL: {}", url);
+    } else {
+        println!("⚠️  No screenshot URL found in personal info");
+    }
+
+    let csv_data = parse_account_to_csv(&personal_info)
+        .map_err(|e| format!("Failed to parse account data: {}", e))?;
+
+    println!("✅ Converted to CSV format");
+    println!("   CSV length: {} bytes", csv_data.len());
+
+    let tokens = G2GAuthTokens {
+        user_id: state.g2g_config.user_id.clone(),
+        refresh_token: state.g2g_config.refresh_token.clone(),
+        long_lived_token: state.g2g_config.long_lived_token.clone(),
+        active_device_token: state.g2g_config.active_device_token.clone(),
+    };
+
+    let mut client = state.g2g_client.lock().await;
+
+    let offer_id = client.create_full_offer_with_data(
+        &title,
+        &description,
+        price,
+        &server,
+        &rank,
+        champions_count,
+        skins_count,
+        &csv_data,
+        screenshot_url.as_deref(),  // ← Передаём скриншот
+        &tokens,
+    ).await?;
+
+    println!("✅ Offer created! ID: {}", offer_id);
+    Ok(offer_id)
+}
+
+fn parse_account_to_csv(text: &str) -> Result<String, String> {
+    let start_marker = "Hi there,";
+    let start_idx = text.find(start_marker)
+        .ok_or("Could not find 'Hi there,' in account file")?;
+
+    let end_markers = [
+        "Thank you for buying from Accounterra,gl&hf!",
+        "Thank you for buying from Accounterra, gl&hf!",
+        "gl&hf!",
+    ];
+
+    let mut end_idx = None;
+    for marker in &end_markers {
+        if let Some(idx) = text[start_idx..].find(marker) {
+            end_idx = Some(start_idx + idx + marker.len());
+            break;
+        }
+    }
+
+    let description_block = if let Some(end) = end_idx {
+        &text[start_idx..end]
+    } else {
+        if let Some(screenshot_idx) = text[start_idx..].find("Screenshot URL") {
+            text[start_idx..start_idx + screenshot_idx].trim()
+        } else {
+            text[start_idx..].trim()
+        }
+    };
+
+    let mut login = String::new();
+    let mut password = String::new();
+    let mut email = String::new();
+    let mut email_access = String::new();
+
+    for line in description_block.lines() {
+        let line = line.trim();
+        if line.starts_with("Login:") {
+            login = line.replace("Login:", "").trim().to_string();
+        } else if line.starts_with("Password:") {
+            password = line.replace("Password:", "").trim().to_string();
+        } else if line.starts_with("Email is") {
+            email = line.replace("Email is", "").trim().to_string();
+        } else if line.contains("[DOT]com/email/") && !line.starts_with("Email is") {
+            email_access = line.split_whitespace().next().unwrap_or("").to_string();
+        }
+    }
+
+    if login.is_empty() || password.is_empty() || email.is_empty() {
+        return Err(format!(
+            "Missing fields - Login: '{}', Password: '{}', Email: '{}'",
+            login, password, email
+        ));
+    }
+
+    // КРИТИЧЕСКИ ВАЖНО: Правильное форматирование CSV
+    // В CSV, кавычки внутри кавычек должны быть удвоены ("" вместо ")
+    // И используем реальные переносы строк, а не \n
+    let description_csv_safe = description_block
+        .replace("\"", "\"\"")  // Кавычки -> двойные кавычки (стандарт CSV)
+        .replace("\r\n", "\n")  // Нормализуем переносы строк
+        .replace("\r", "\n");   // Нормализуем переносы строк
+
+    // CSV формат с реальными переносами строк в description
+    let csv_line = format!(
+        "{},{},,,,,,,,{},{},\"{}\"\r\n",
+        login,
+        password,
+        email,
+        email_access,
+        description_csv_safe
+    );
+
+    // Проверка
+    let comma_count = csv_line.matches(',').count();
+    println!("✅ CSV created with {} commas", comma_count);
+    println!("   First 200 chars: {}", &csv_line[..csv_line.len().min(200)]);
+
+    Ok(csv_line)
+}
+
 fn main() {
     let g2g_config = match G2GConfig::from_env() {
         Ok(config) => {
@@ -386,7 +638,9 @@ fn main() {
             read_text_file,
             fetch_skin_prices,
             get_g2g_config_status,
-            open_account_screenshot
+            open_account_screenshot,
+            create_g2g_offer,
+            create_listing
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
