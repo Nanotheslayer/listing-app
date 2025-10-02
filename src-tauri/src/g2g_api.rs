@@ -829,11 +829,11 @@ impl G2GApiClient {
             "NA" | "NA1" => "e2f2c55b",
             "BR" | "BR1" => "31e5d298",
             "LAN" => "302ba1e6",
-            "LAS" => "d6ed5ab1",
-            "OCE" => "e35ad6c4",
-            "TR" => "5f8be29a",
+            "LAS" => "f28899f5",
+            "OCE" => "5c030fef",
+            "TR" => "2247e703",
             "RU" => "d94d8d49",
-            "JP" => "8b6a5b8e",
+            "JP" => "e9926686",
             "KR" => "a7bb0eb5",
             _ => "1a87dd85", // Default EUNE
         }
