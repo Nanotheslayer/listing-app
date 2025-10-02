@@ -63,19 +63,18 @@
     const account = accountManager.getAccount(accountId);
     if (!account) return;
 
-    if (confirm(`Удалить аккаунт "${account.name}" из списка?`)) {
-      accountManager.removeAccount(accountId);
-      // Обновляем отображение
-      accounts = accountManager.getAccounts();
+    accountManager.removeAccount(accountId);
+    // Обновляем отображение
+    accounts = accountManager.getAccounts();
 
-      statusMessage = `Аккаунт ${account.name} удален из списка`;
-      messageType = "info";
+    statusMessage = `Аккаунт ${account.name} удален из списка`;
+    messageType = "info";
 
-      setTimeout(() => {
-        statusMessage = "";
-      }, 3000);
-    }
+    setTimeout(() => {
+      statusMessage = "";
+    }, 3000);
   }
+
 
   function getStatusColor(status: Account["status"], is_listed?: boolean) {
     if (is_listed) {

@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs;
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
@@ -73,6 +75,7 @@ struct ListingProgressPayload {
 // Global API client (без g2g_config)
 struct AppState {
     g2g_client: Mutex<G2GApiClient>,
+    cancel_price_calc: Arc<AtomicBool>,
 }
 
 // Функция для загрузки настроек G2G
@@ -483,7 +486,9 @@ async fn fetch_skin_prices(
     let total_skins = request.skins.len();
     println!("Fetching prices for {} skins on server {}", total_skins, request.server);
 
-    // Загружаем настройки динамически
+    // 👇 НОВОЕ: Сброс флага отмены перед началом
+    state.cancel_price_calc.store(false, Ordering::Relaxed);
+
     let g2g_settings = load_g2g_settings()
         .map_err(|e| format!("Не удалось загрузить настройки G2G: {}", e))?;
 
@@ -500,6 +505,20 @@ async fn fetch_skin_prices(
     let mut max_price = 0.0;
 
     for (index, skin) in request.skins.iter().enumerate() {
+        // 👇 НОВОЕ: Проверка флага отмены
+        if state.cancel_price_calc.load(Ordering::Relaxed) {
+            println!("🛑 Price calculation cancelled by user");
+
+            let _ = app.emit("price-progress", PriceProgressPayload {
+                current: index + 1,
+                total: total_skins,
+                skin_name: "Cancelled".to_string(),
+                status: "cancelled".to_string(),
+            });
+
+            return Err("Price calculation cancelled by user".to_string());
+        }
+
         let current = index + 1;
 
         let _ = app.emit("price-progress", PriceProgressPayload {
@@ -783,6 +802,13 @@ fn settings_exist() -> bool {
     AppSettings::exists()
 }
 
+#[tauri::command]
+fn cancel_price_calculation(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    println!("🛑 Cancelling price calculation...");
+    state.cancel_price_calc.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
 fn main() {
     // Не загружаем настройки при старте - они будут загружаться динамически
 
@@ -792,6 +818,7 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .manage(AppState {
             g2g_client: Mutex::new(G2GApiClient::new()),
+            cancel_price_calc: Arc::new(AtomicBool::new(false)),
         })
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -800,6 +827,7 @@ fn main() {
             read_account_file,
             read_text_file,
             fetch_skin_prices,
+            cancel_price_calculation,
             get_g2g_config_status,
             open_account_screenshot,
             create_g2g_offer,

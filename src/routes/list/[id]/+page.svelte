@@ -202,6 +202,12 @@
   async function calculatePrices() {
     if (!account) return;
 
+    // Если уже идет расчет - отменяем
+    if (isCalculatingPrices) {
+      await cancelPriceCalculation();
+      return;
+    }
+
     loading = true;
     isCalculatingPrices = true;
     statusMessage = "Подсчет цен скинов...";
@@ -252,15 +258,15 @@
       ).join('\n');
 
       skinsPriceInfo = `
-📊 Анализ завершен для аккаунта: ${account.name}
-🌍 Сервер: ${accountData.server}
+  📊 Анализ завершен для аккаунта: ${account.name}
+  🌍 Сервер: ${accountData.server}
 
-Найдено скинов: ${response.prices.length}
-💰 Общая стоимость: ${response.total_value}
-${response.most_expensive ? `⭐ Самый дорогой: ${response.most_expensive.skin_name} (${response.most_expensive.price})` : ''}
+  Найдено скинов: ${response.prices.length}
+  💰 Общая стоимость: ${response.total_value}
+  ${response.most_expensive ? `⭐ Самый дорогой: ${response.most_expensive.skin_name} (${response.most_expensive.price})` : ''}
 
-📋 Список цен:
-${priceLines}
+  📋 Список цен:
+  ${priceLines}
       `.trim();
 
       statusMessage = "Цены успешно рассчитаны!";
@@ -273,10 +279,18 @@ ${priceLines}
     } catch (error) {
       console.error("Ошибка расчета цен:", error);
 
-      // 👇 ОБНОВИТЬ ОБРАБОТКУ ОШИБОК
-      if (error instanceof Error && error.message.includes("токены не настроены")) {
-        skinsPriceInfo = `❌ ${error.message}`;
-        statusMessage = error.message;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Проверяем тип ошибки
+      if (errorMessage.includes("cancelled")) {
+        // Отмена расчета пользователем
+        skinsPriceInfo = "⚠️ Расчет цен был отменен пользователем";
+        statusMessage = "Расчет отменен";
+        messageType = "info";
+      } else if (errorMessage.includes("токены не настроены")) {
+        // Токены не настроены
+        skinsPriceInfo = `❌ ${errorMessage}`;
+        statusMessage = errorMessage;
         messageType = "error";
 
         // Предложить перейти в настройки через 3 секунды
@@ -286,8 +300,9 @@ ${priceLines}
           }
         }, 3000);
       } else {
-        skinsPriceInfo = `❌ Ошибка получения цен:\n${error.message}`;
-        statusMessage = `Ошибка расчета: ${error.message}`;
+        // Другие ошибки
+        skinsPriceInfo = `❌ Ошибка получения цен:\n${errorMessage}`;
+        statusMessage = `Ошибка расчета: ${errorMessage}`;
         messageType = "error";
       }
 
@@ -297,6 +312,25 @@ ${priceLines}
     } finally {
       loading = false;
       isCalculatingPrices = false;
+      priceProgress = null;
+    }
+  }
+    async function cancelPriceCalculation() {
+    try {
+      await invoke("cancel_price_calculation");
+
+      statusMessage = "Расчет цен отменен";
+      messageType = "info";
+
+      isCalculatingPrices = false;
+      loading = false;
+      priceProgress = null;
+
+      setTimeout(() => {
+        statusMessage = "";
+      }, 3000);
+    } catch (error) {
+      console.error("Ошибка отмены:", error);
     }
   }
 
@@ -837,16 +871,16 @@ ${priceLines}
 
             <button
               onclick={calculatePrices}
-              disabled={loading || isCalculatingPrices || !hasG2GSettings}
-              class="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-lg transition-all duration-200 shadow-lg hover:shadow-blue-500/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              title={!hasG2GSettings ? "Настройте G2G токены в настройках" : ""}
+              disabled={loading && !isCalculatingPrices || !hasG2GSettings}
+              class="w-full py-3 bg-gradient-to-r {isCalculatingPrices ? 'from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500' : 'from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500'} text-white font-semibold rounded-lg transition-all duration-200 shadow-lg {isCalculatingPrices ? 'hover:shadow-red-500/50' : 'hover:shadow-blue-500/50'} disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              title={!hasG2GSettings ? "Настройте G2G токены в настройках" : isCalculatingPrices ? "Отменить расчет" : "Начать расчет цен"}
             >
               {#if isCalculatingPrices}
-                <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span>Расчет... {priceProgress ? `${priceProgress.current}/${priceProgress.total}` : ''}</span>
+                <span>🛑</span>
+                <span>Отменить расчет</span>
+                {#if priceProgress}
+                  <span class="ml-2 text-sm opacity-75">({priceProgress.current}/{priceProgress.total})</span>
+                {/if}
               {:else}
                 <span>🧮</span>
                 <span>Посчитать цены</span>
