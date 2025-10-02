@@ -88,7 +88,7 @@ function extractList(text: string, startMarker: string): string[] {
     .filter(item => item.length > 0 && !item.startsWith("─") && !item.startsWith("["));
 }
 
-// Нормализация имени сервера
+// Нормализация имени сервера - ОБНОВЛЕНО для поддержки полных названий
 function normalizeServer(server: string): string {
   const serverMap: Record<string, string> = {
     "brazil": "BR",
@@ -96,43 +96,81 @@ function normalizeServer(server: string): string {
     "br1": "BR",
     "euw": "EUW",
     "euw1": "EUW",
+    "europe west": "EUW",
     "eune": "EUNE",
     "eune1": "EUNE",
+    "europe nordic & east": "EUNE",
+    "europe nordic east": "EUNE",
     "na": "NA",
     "na1": "NA",
+    "north america": "NA",
     "oce": "OCE",
     "oce1": "OCE",
+    "oceania": "OCE",
     "las": "LAS",
     "las1": "LAS",
+    "latin america south": "LAS",
     "lan": "LAN",
     "lan1": "LAN",
+    "latin america north": "LAN",
     "tr": "TR",
     "tr1": "TR",
+    "turkey": "TR",
     "ru": "RU",
     "ru1": "RU",
+    "russia": "RU",
     "jp": "JP",
     "jp1": "JP",
+    "japan": "JP",
     "kr": "KR",
+    "korea": "KR",
   };
 
   const normalized = server.toLowerCase().trim();
   return serverMap[normalized] || server.toUpperCase();
 }
 
-// Извлечение сервера из текста
+// Извлечение сервера из текста - ИЗМЕНЕН ПРИОРИТЕТ
 function extractServer(text: string): string {
-  // Ищем в ссылке OP.GG (самый надежный способ)
-  let match = text.match(/op\.gg\/summoners\/([a-z0-9]+)\//i);
-  if (match) return normalizeServer(match[1]);
+  // 🎯 ПРИОРИТЕТ 1: Ищем в явной строке "Region: Brazil" (из файла {account}.txt)
+  let match = text.match(/Region:\s*([^\n\r]+)/i);
+  if (match) {
+    const region = match[1].trim();
+    console.log("✅ Найден регион в строке 'Region:':", region);
+    return normalizeServer(region);
+  }
 
-  // Ищем в строке типа "Account(Server - Brazil)"
-  match = text.match(/Server\s*[-:]\s*([A-Za-z0-9]+)/i);
-  if (match) return normalizeServer(match[1]);
+  // 🎯 ПРИОРИТЕТ 2: Ищем в строке типа "Account(Server - Brazil)"
+  match = text.match(/Account\s*\(\s*Server\s*-\s*([^)\n\r]+)\s*\)/i);
+  if (match) {
+    const region = match[1].trim();
+    console.log("✅ Найден регион в 'Account(Server - ...)':", region);
+    return normalizeServer(region);
+  }
 
-  // Ищем в имени файла (например, "uyep_br1_info.txt")
+  // 🎯 ПРИОРИТЕТ 3: Ищем в ссылке OP.GG (может отсутствовать)
+  match = text.match(/op\.gg\/summoners\/([a-z0-9]+)\//i);
+  if (match) {
+    console.log("✅ Найден регион в OP.GG:", match[1]);
+    return normalizeServer(match[1]);
+  }
+
+  // 🎯 ПРИОРИТЕТ 4: Ищем в строке с общим паттерном "Server:"
+  match = text.match(/Server\s*[-:]\s*([^\n\r]+)/i);
+  if (match) {
+    const region = match[1].trim();
+    console.log("✅ Найден регион в 'Server:':", region);
+    return normalizeServer(region);
+  }
+
+  // 🎯 ПРИОРИТЕТ 5: Ищем в имени файла (например, "uyep_br1_info.txt")
   match = text.match(/_([a-z]+\d?)_/i);
-  if (match) return normalizeServer(match[1]);
+  if (match) {
+    console.log("✅ Найден регион в имени файла:", match[1]);
+    return normalizeServer(match[1]);
+  }
 
+  console.warn("⚠️ Регион не найден ни одним методом, используем Unknown");
   return "Unknown";
 }
 

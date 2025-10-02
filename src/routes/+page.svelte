@@ -40,7 +40,7 @@
       // Автоматически скрыть сообщение через 3 секунды
       setTimeout(() => {
         statusMessage = "";
-      }, 3000);
+      }, 10000);
     } catch (error) {
       console.error("Ошибка:", error);
       statusMessage = `Ошибка загрузки: ${error}`;
@@ -283,6 +283,6 @@
   }
 
   .animate-fade-out {
-    animation: fade-out 3s ease-out forwards;
+    animation: fade-out 10s ease-out forwards;
   }
 </style>

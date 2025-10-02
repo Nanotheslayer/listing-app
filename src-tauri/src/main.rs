@@ -15,28 +15,6 @@ mod config;
 use g2g_api::{G2GApiClient, G2GAuthTokens, SkinPrice};
 use config::{AppSettings, G2GSettings};
 
-// Global API client (без g2g_config)
-struct AppState {
-    g2g_client: Mutex<G2GApiClient>,
-}
-
-// Функция для загрузки настроек G2G
-fn load_g2g_settings() -> Result<G2GSettings, String> {
-    match AppSettings::load() {
-        Ok(settings) => {
-            println!("✅ G2G settings loaded from file");
-            Ok(settings.g2g)
-        }
-        Err(_) => {
-            // Fallback на .env
-            config::load_from_env()
-                .ok_or_else(|| {
-                    "G2G токены не настроены. Перейдите в настройки приложения.".to_string()
-                })
-        }
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AccountFolder {
     pub name: String,
@@ -84,6 +62,36 @@ struct PriceProgressPayload {
     status: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct ListingProgressPayload {
+    stage: String,
+    current: usize,
+    total: usize,
+    message: String,
+}
+
+// Global API client (без g2g_config)
+struct AppState {
+    g2g_client: Mutex<G2GApiClient>,
+}
+
+// Функция для загрузки настроек G2G
+fn load_g2g_settings() -> Result<G2GSettings, String> {
+    match AppSettings::load() {
+        Ok(settings) => {
+            println!("✅ G2G settings loaded from file");
+            Ok(settings.g2g)
+        }
+        Err(_) => {
+            // Fallback на .env
+            config::load_from_env()
+                .ok_or_else(|| {
+                    "G2G токены не настроены. Перейдите в настройки приложения.".to_string()
+                })
+        }
+    }
+}
+
 fn save_offer_id_to_file(account_path: &str, offer_id: &str) -> Result<(), String> {
     println!("💾 Saving offer_id to file...");
 
@@ -120,8 +128,19 @@ fn check_if_listed(account_path: &str) -> bool {
 #[tauri::command]
 async fn create_g2g_offer(
     request: CreateOfferRequest,
+    app: tauri::AppHandle,  // ← Добавили app handle
     state: tauri::State<'_, AppState>
 ) -> Result<String, String> {
+    let total_stages = 5;
+
+    // Этап 1: Чтение данных
+    let _ = app.emit("listing-progress", ListingProgressPayload {
+        stage: "reading".to_string(),
+        current: 1,
+        total: total_stages,
+        message: "Чтение данных аккаунта...".to_string(),
+    });
+
     println!("🎯 Creating G2G offer...");
     println!("   Title: {}", request.title);
     println!("   Server: {}", request.server);
@@ -165,9 +184,34 @@ async fn create_g2g_offer(
 
     println!("✅ Converted to CSV, {} bytes", csv_data.len());
 
+    // Этап 2: Создание оффера
+    let _ = app.emit("listing-progress", ListingProgressPayload {
+        stage: "creating".to_string(),
+        current: 2,
+        total: total_stages,
+        message: "Создание объявления...".to_string(),
+    });
+
     let mut client = state.g2g_client.lock().await;
 
-    let offer_id = client.create_full_offer_with_data(
+    // Создаем пустой оффер
+    let offer_id = client.create_offer_id(&tokens).await?;
+    println!("✅ Offer ID created: {}", offer_id);
+
+    // Этап 3: Заполнение информации
+    let _ = app.emit("listing-progress", ListingProgressPayload {
+        stage: "updating".to_string(),
+        current: 3,
+        total: total_stages,
+        message: "Заполнение информации...".to_string(),
+    });
+
+    let delay_ms = rand::thread_rng().gen_range(1500..2500);
+    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+
+    // Обновляем оффер и получаем relation_id
+    let relation_id = client.update_offer(
+        &offer_id,
         &request.title,
         &request.description,
         request.price,
@@ -175,10 +219,33 @@ async fn create_g2g_offer(
         &request.rank,
         request.champions_count,
         request.skins_count,
-        &csv_data,
         screenshot_url.as_deref(),
         &tokens,
     ).await?;
+    println!("✅ Offer updated, relation_id: {}", relation_id);
+
+    // Этап 4: Загрузка данных
+    let _ = app.emit("listing-progress", ListingProgressPayload {
+        stage: "uploading".to_string(),
+        current: 4,
+        total: total_stages,
+        message: "Загрузка данных аккаунта...".to_string(),
+    });
+
+    let delay_ms = rand::thread_rng().gen_range(1500..2500);
+    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+
+    // Загружаем данные аккаунта
+    client.upload_account_data(&offer_id, &relation_id, &csv_data, &tokens).await?;
+    println!("✅ Account data uploaded");
+
+    // Этап 5: Завершение
+    let _ = app.emit("listing-progress", ListingProgressPayload {
+        stage: "finishing".to_string(),
+        current: 5,
+        total: total_stages,
+        message: "Сохранение...".to_string(),
+    });
 
     println!("✅ Offer created with data! ID: {}", offer_id);
 

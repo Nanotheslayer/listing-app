@@ -29,6 +29,13 @@
     status: string;
   }
 
+  interface ListingProgress {
+  stage: string;
+  current: number;
+  total: number;
+  message: string;
+}
+
   // Получаем ID аккаунта из URL
   const accountId = parseInt($page.params.id);
 
@@ -46,6 +53,10 @@
   // Прогресс расчета цен
   let priceProgress = $state<PriceProgress | null>(null);
   let isCalculatingPrices = $state(false);
+
+  // Прогресс выставления
+  let listingProgress = $state<ListingProgress | null>(null);
+  let isListing = $state(false);
 
   // Personal Info
   let personalInfo = $state("");
@@ -70,6 +81,8 @@
   // Unsubscribe функция для событий
   let unsubscribeProgress: (() => void) | null = null;
 
+  let unsubscribeListing: (() => void) | null = null;
+
   // Загружаем данные аккаунта ОДИН РАЗ при монтировании компонента
   onMount(async () => {
     account = accountManager.getAccount(accountId);
@@ -83,10 +96,16 @@
     hasG2GSettings = await settingsManager.hasG2GSettings();
     checkingSettings = false;
 
-    // Подписываемся на события прогресса
+    // Подписка на прогресс расчета цен
     unsubscribeProgress = await listen<PriceProgress>("price-progress", (event) => {
       priceProgress = event.payload;
       console.log(`Progress: ${event.payload.current}/${event.payload.total} - ${event.payload.skin_name} (${event.payload.status})`);
+    });
+
+    // 👇 НОВОЕ: Подписка на прогресс выставления
+    unsubscribeListing = await listen<ListingProgress>("listing-progress", (event) => {
+      listingProgress = event.payload;
+      console.log(`Listing: ${event.payload.current}/${event.payload.total} - ${event.payload.message}`);
     });
   });
 
@@ -94,6 +113,10 @@
   onDestroy(() => {
     if (unsubscribeProgress) {
       unsubscribeProgress();
+    }
+    // 👇 НОВОЕ
+    if (unsubscribeListing) {
+      unsubscribeListing();
     }
   });
 
@@ -108,6 +131,8 @@
     }
 
     loading = true;
+    isListing = true;
+    listingProgress = null;
     statusMessage = "Автозаполнение формы...";
     messageType = "info";
 
@@ -413,6 +438,17 @@ ${priceLines}
     return parts;
   }
 
+  function getStageIcon(stage: string): string {
+    switch (stage) {
+      case "reading": return "📖";
+      case "creating": return "✨";
+      case "updating": return "✏️";
+      case "uploading": return "📤";
+      case "finishing": return "✅";
+      default: return "⏳";
+    }
+  }
+
   async function listAccount() {
     if (!account) return;
 
@@ -502,9 +538,11 @@ ${priceLines}
 
       setTimeout(() => {
         statusMessage = "";
-      }, 5000);
+      }, 10000);
     } finally {
       loading = false;
+      isListing = false;
+      listingProgress = null;
     }
   }
 
@@ -635,7 +673,7 @@ ${priceLines}
         </div>
       </div>
     {:else}
-      <div class="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
         <!-- Левая колонка - Основная форма -->
         <div class="lg:col-span-2 space-y-6">
           <!-- Заголовок -->
@@ -680,53 +718,68 @@ ${priceLines}
             ></textarea>
           </div>
 
-          <!-- Цена товара -->
-          <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
-            <div class="flex items-center gap-2 mb-4">
-              <span class="text-xl">💵</span>
-              <label class="text-lg font-semibold text-white">Цена товара</label>
-            </div>
-            <div class="relative">
-              <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                <span class="text-gray-400 text-lg font-semibold">$</span>
-              </div>
-              <input
-                type="text"
-                bind:value={price}
-                oninput={handlePriceInput}
-                placeholder="0.00"
-                class="w-full pl-8 pr-4 py-3 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition text-lg font-semibold"
-              />
-            </div>
-            {#if price && parseFloat(price) > 0}
-              <div class="mt-3 text-sm text-gray-400 flex items-center gap-2">
-                <span>💰</span>
-                <span>Цена: <span class="text-green-400 font-semibold">${parseFloat(price).toFixed(2)}</span></span>
-              </div>
-            {/if}
-          </div>
-
           <!-- Кнопка выставления -->
-          <button
-            onclick={listAccount}
-            disabled={loading || !title.trim() || !description.trim() || !price || parseFloat(price) <= 0 || !hasG2GSettings}
-            class="w-full py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl transition-all duration-200 shadow-lg hover:shadow-green-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-3 text-lg"
-            title={!hasG2GSettings ? "Настройте G2G токены в настройках" : ""}
-          >
-            {#if loading}
-              <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <span>Выставление...</span>
-            {:else}
-              <span>🚀</span>
-              <span>Выставить аккаунт</span>
-            {/if}
-          </button>
+          {#if isListing && listingProgress}
+            <div class="w-full">
+              <div class="bg-gradient-to-r from-green-600 to-emerald-600 rounded-xl p-4 shadow-lg">
+                <div class="space-y-3">
+                  <!-- Заголовок с иконкой -->
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                      <span class="text-2xl animate-pulse">{getStageIcon(listingProgress.stage)}</span>
+                      <span class="text-white font-bold text-lg">{listingProgress.message}</span>
+                    </div>
+                    <span class="text-white/90 font-semibold text-sm">
+                      {listingProgress.current}/{listingProgress.total}
+                    </span>
+                  </div>
+
+                  <!-- Прогресс-бар -->
+                  <div class="relative">
+                    <div class="w-full bg-green-900/40 rounded-full h-3 overflow-hidden border border-green-700/50">
+                      <div
+                        class="h-full bg-gradient-to-r from-emerald-400 to-green-300 transition-all duration-500 ease-out rounded-full"
+                        style="width: {(listingProgress.current / listingProgress.total) * 100}%"
+                      ></div>
+                    </div>
+                    <div class="absolute inset-0 flex items-center justify-center">
+                      <span class="text-xs font-bold text-gray-900 drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]">
+                        {Math.round((listingProgress.current / listingProgress.total) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Индикатор этапов -->
+                  <div class="flex justify-between items-center gap-1">
+                    {#each Array(listingProgress.total) as _, i}
+                      <div class="flex-1 h-2 rounded-full {i < listingProgress.current ? 'bg-emerald-300' : 'bg-green-900/30'} transition-colors duration-300"></div>
+                    {/each}
+                  </div>
+                </div>
+              </div>
+            </div>
+          {:else}
+            <button
+              onclick={listAccount}
+              disabled={loading || !title.trim() || !description.trim() || !price || parseFloat(price) <= 0 || !hasG2GSettings}
+              class="w-full py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-bold rounded-xl transition-all duration-200 shadow-lg hover:shadow-green-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none flex items-center justify-center gap-3 text-lg"
+              title={!hasG2GSettings ? "Настройте G2G токены в настройках" : ""}
+            >
+              {#if loading && !isListing}
+                <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Подготовка...</span>
+              {:else}
+                <span>🚀</span>
+                <span>Выставить аккаунт</span>
+              {/if}
+            </button>
+          {/if}
         </div>
 
-        <!-- Правая колонка - Цены скинов и Personal Info -->
+        <!-- Средняя колонка - Цены скинов и Цена товара -->
         <div class="lg:col-span-1 space-y-6">
           <!-- Цены скинов -->
           <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6 sticky top-6">
@@ -801,136 +854,165 @@ ${priceLines}
             </button>
           </div>
 
-          <!-- Personal Info -->
-          <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
-            <button
-              onclick={loadPersonalInfo}
-              disabled={loadingPersonalInfo}
-              class="w-full flex items-center justify-between p-4 bg-gray-900/50 hover:bg-gray-900/70 rounded-lg transition-all duration-200 border border-gray-700 hover:border-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <div class="flex items-center gap-3">
-                <span class="text-xl">👤</span>
-                <h3 class="text-lg font-semibold text-white">Personal Info</h3>
+          <!-- Цена товара (компактная) -->
+          <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-4">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="text-lg">💵</span>
+              <label class="text-base font-semibold text-white">Цена товара</label>
+            </div>
+            <div class="relative">
+              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <span class="text-gray-400 text-base font-semibold">$</span>
               </div>
-              <div class="flex items-center gap-2">
-                {#if loadingPersonalInfo}
-                  <svg class="animate-spin h-5 w-5 text-purple-400" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                {:else}
-                  <svg
-                    class="w-5 h-5 text-gray-400 transition-transform duration-200 {showPersonalInfo ? 'rotate-180' : ''}"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                  </svg>
-                {/if}
-              </div>
-            </button>
-
-            {#if showPersonalInfo}
-              <div class="mt-4 animate-slide-down">
-                <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4 max-h-[400px] overflow-y-auto">
-                  <div class="text-sm text-gray-300 font-mono leading-relaxed whitespace-pre-wrap">
-                    {#each personalInfo.split('\n') as line}
-                      <div>
-                        {#each parseTextWithLinks(line) as part}
-                          {#if part.type === 'link'}
-                            <button
-                              onclick={() => openLink(part.content)}
-                              class="text-blue-400 hover:text-blue-300 underline hover:no-underline transition-colors cursor-pointer inline"
-                              title="Открыть в браузере"
-                            >
-                              {part.content}
-                            </button>
-                          {:else}
-                            <span>{part.content}</span>
-                          {/if}
-                        {/each}
-                      </div>
-                    {/each}
-                  </div>
-                </div>
+              <input
+                type="text"
+                bind:value={price}
+                oninput={handlePriceInput}
+                placeholder="0.00"
+                class="w-full pl-7 pr-3 py-2 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition text-base font-semibold"
+              />
+            </div>
+            {#if price && parseFloat(price) > 0}
+              <div class="mt-2 text-xs text-gray-400 flex items-center gap-2">
+                <span>💰</span>
+                <span>Цена: <span class="text-green-400 font-semibold">${parseFloat(price).toFixed(2)}</span></span>
               </div>
             {/if}
-          </div>
-
-          <!-- In-game Info -->
-          <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
-            <button
-              onclick={loadInGameInfo}
-              disabled={loadingInGameInfo}
-              class="w-full flex items-center justify-between p-4 bg-gray-900/50 hover:bg-gray-900/70 rounded-lg transition-all duration-200 border border-gray-700 hover:border-indigo-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <div class="flex items-center gap-3">
-                <span class="text-xl">🎮</span>
-                <h3 class="text-lg font-semibold text-white">In-game Info</h3>
-              </div>
-              <div class="flex items-center gap-2">
-                {#if loadingInGameInfo}
-                  <svg class="animate-spin h-5 w-5 text-indigo-400" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                {:else}
-                  <svg
-                    class="w-5 h-5 text-gray-400 transition-transform duration-200 {showInGameInfo ? 'rotate-180' : ''}"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                  </svg>
-                {/if}
-              </div>
-            </button>
-
-            {#if showInGameInfo}
-              <div class="mt-4 animate-slide-down">
-                <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4 max-h-[400px] overflow-y-auto">
-                  <div class="text-sm text-gray-300 font-mono leading-relaxed whitespace-pre-wrap">
-                    {#each inGameInfo.split('\n') as line}
-                      <div>
-                        {#each parseTextWithLinks(line) as part}
-                          {#if part.type === 'link'}
-                            <button
-                              onclick={() => openLink(part.content)}
-                              class="text-blue-400 hover:text-blue-300 underline hover:no-underline transition-colors cursor-pointer inline"
-                              title="Открыть в браузере"
-                            >
-                              {part.content}
-                            </button>
-                          {:else}
-                            <span>{part.content}</span>
-                          {/if}
-                        {/each}
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              </div>
-            {/if}
-          </div>
-
-          <!-- Screenshot -->
-          <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
-            <button
-              onclick={openScreenshot}
-              class="w-full flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-lg transition-all duration-200 shadow-lg hover:shadow-emerald-500/50"
-              title="Открыть скриншот аккаунта"
-            >
-              <span class="text-2xl">🖼️</span>
-              <h3 class="text-lg font-semibold text-white">Показать скриншот</h3>
-            </button>
-            <p class="text-xs text-gray-400 mt-3 text-center">
-              Откроет первый PNG файл из папки аккаунта
-            </p>
           </div>
         </div>
-      </div>
+
+          <!-- Правая колонка - Меню -->
+          <div class="lg:col-span-1 space-y-6">
+            <!-- Personal Info -->
+            <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
+              <button
+                onclick={loadPersonalInfo}
+                disabled={loadingPersonalInfo}
+                class="w-full flex items-center justify-between p-4 bg-gray-900/50 hover:bg-gray-900/70 rounded-lg transition-all duration-200 border border-gray-700 hover:border-purple-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div class="flex items-center gap-3">
+                  <span class="text-xl">👤</span>
+                  <h3 class="text-lg font-semibold text-white">Personal Info</h3>
+                </div>
+                <div class="flex items-center gap-2">
+                  {#if loadingPersonalInfo}
+                    <svg class="animate-spin h-5 w-5 text-purple-400" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  {:else}
+                    <svg
+                      class="w-5 h-5 text-gray-400 transition-transform duration-200 {showPersonalInfo ? 'rotate-180' : ''}"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  {/if}
+                </div>
+              </button>
+
+              {#if showPersonalInfo}
+                <div class="mt-4 animate-slide-down">
+                  <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4 max-h-[400px] overflow-y-auto">
+                    <div class="text-sm text-gray-300 font-mono leading-relaxed whitespace-pre-wrap">
+                      {#each personalInfo.split('\n') as line}
+                        <div>
+                          {#each parseTextWithLinks(line) as part}
+                            {#if part.type === 'link'}
+                              <button
+                                onclick={() => openLink(part.content)}
+                                class="text-blue-400 hover:text-blue-300 underline hover:no-underline transition-colors cursor-pointer inline"
+                                title="Открыть в браузере"
+                              >
+                                {part.content}
+                              </button>
+                            {:else}
+                              <span>{part.content}</span>
+                            {/if}
+                          {/each}
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+              {/if}
+            </div>
+
+            <!-- In-game Info -->
+            <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
+              <button
+                onclick={loadInGameInfo}
+                disabled={loadingInGameInfo}
+                class="w-full flex items-center justify-between p-4 bg-gray-900/50 hover:bg-gray-900/70 rounded-lg transition-all duration-200 border border-gray-700 hover:border-indigo-500/50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div class="flex items-center gap-3">
+                  <span class="text-xl">🎮</span>
+                  <h3 class="text-lg font-semibold text-white">In-game Info</h3>
+                </div>
+                <div class="flex items-center gap-2">
+                  {#if loadingInGameInfo}
+                    <svg class="animate-spin h-5 w-5 text-indigo-400" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  {:else}
+                    <svg
+                      class="w-5 h-5 text-gray-400 transition-transform duration-200 {showInGameInfo ? 'rotate-180' : ''}"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  {/if}
+                </div>
+              </button>
+
+              {#if showInGameInfo}
+                <div class="mt-4 animate-slide-down">
+                  <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4 max-h-[400px] overflow-y-auto">
+                    <div class="text-sm text-gray-300 font-mono leading-relaxed whitespace-pre-wrap">
+                      {#each inGameInfo.split('\n') as line}
+                        <div>
+                          {#each parseTextWithLinks(line) as part}
+                            {#if part.type === 'link'}
+                              <button
+                                onclick={() => openLink(part.content)}
+                                class="text-blue-400 hover:text-blue-300 underline hover:no-underline transition-colors cursor-pointer inline"
+                                title="Открыть в браузере"
+                              >
+                                {part.content}
+                              </button>
+                            {:else}
+                              <span>{part.content}</span>
+                            {/if}
+                          {/each}
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+              {/if}
+            </div>
+
+            <!-- Screenshot -->
+            <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl border border-gray-700 p-6">
+              <button
+                onclick={openScreenshot}
+                class="w-full flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-lg transition-all duration-200 shadow-lg hover:shadow-emerald-500/50"
+                title="Открыть скриншот аккаунта"
+              >
+                <span class="text-2xl">🖼️</span>
+                <h3 class="text-lg font-semibold text-white">Показать скриншот</h3>
+              </button>
+              <p class="text-xs text-gray-400 mt-3 text-center">
+                Откроет первый PNG файл из папки аккаунта
+              </p>
+            </div>
+          </div>
+        </div>
     {/if}
   </div>
 </main>
@@ -949,7 +1031,7 @@ ${priceLines}
   }
 
   .animate-fade-out {
-    animation: fade-out 3s ease-out forwards;
+    animation: fade-out 10s ease-out forwards;
   }
 
   @keyframes slide-down {
@@ -984,5 +1066,52 @@ ${priceLines}
 
   :global(*::-webkit-scrollbar-thumb:hover) {
     background: rgb(107, 114, 128);
+  }
+
+  /* Уменьшаем контент без белых зазоров */
+  main {
+    min-height: 100vh;
+  }
+
+  .container {
+    max-width: 1200px !important; /* было 1280px по умолчанию */
+  }
+
+  /* Уменьшаем отступы */
+  .py-8 {
+    padding-top: 1.5rem !important;
+    padding-bottom: 1.5rem !important;
+  }
+
+  .py-12 {
+    padding-top: 2rem !important;
+    padding-bottom: 2rem !important;
+  }
+
+  .px-6 {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+
+  /* Уменьшаем размеры карточек */
+  .p-6 {
+    padding: 1rem !important;
+  }
+
+  .p-4 {
+    padding: 0.75rem !important;
+  }
+
+  /* Уменьшаем размеры текста */
+  .text-3xl {
+    font-size: 1.5rem !important;
+  }
+
+  .text-2xl {
+    font-size: 1.25rem !important;
+  }
+
+  .text-lg {
+    font-size: 0.95rem !important;
   }
 </style>

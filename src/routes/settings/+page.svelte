@@ -31,7 +31,7 @@
         refreshToken = settings.g2g.refresh_token || "";
         longLivedToken = settings.g2g.long_lived_token || "";
         activeDeviceToken = settings.g2g.active_device_token || "";
-        
+
         console.log("✅ Settings loaded");
       }
     } catch (error) {
@@ -56,7 +56,7 @@
       statusMessage = errors.join(", ");
       messageType = "error";
       loading = false;
-      setTimeout(() => { statusMessage = ""; }, 5000);
+      setTimeout(() => { statusMessage = ""; }, 10000);
       return;
     }
 
@@ -89,7 +89,7 @@
     loading = true;
     try {
       await settingsManager.clearSettings();
-      
+
       userId = "";
       refreshToken = "";
       longLivedToken = "";
@@ -97,7 +97,7 @@
 
       statusMessage = "✅ Настройки успешно удалены";
       messageType = "success";
-      
+
       setTimeout(() => { statusMessage = ""; }, 3000);
     } catch (error) {
       statusMessage = `❌ Ошибка удаления: ${error}`;
@@ -303,6 +303,6 @@
   }
 
   .animate-fade-out {
-    animation: fade-out 3s ease-out forwards;
+    animation: fade-out 10s ease-out forwards;
   }
 </style>
