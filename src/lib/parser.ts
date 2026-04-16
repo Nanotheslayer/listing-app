@@ -243,7 +243,10 @@ export async function parseAccountData(accountPath: string, files: string[]): Pr
     riotPoints: extractNumber(allContent, /Riot\s+Points\s*[-:]\s*(\d+)/i),
     blueEssence: extractNumber(allContent, /Blue\s+Essence\s*[-:]\s*(\d+)/i),
     orangeEssence: extractNumber(allContent, /Orange\s+Essence\s*[-:]\s*(\d+)/i),
-    lastPlayDate: "Unknown",
+    lastPlayDate: (() => {
+      const match = allContent.match(/⤱\s*Last Play \/ Inactive From\s*-\s*(.+)/i);
+      return match ? match[1].trim() : "Unknown";
+    })(),
   };
 
   // Пытаемся найти ссылку OP.GG
@@ -321,8 +324,6 @@ export function generateTitle(data: AccountData): { title: string; usedChampions
 // Генерация описания
 export function generateDescription(data: AccountData): string {
   const lines: string[] = [
-    "⮸Full info into the media⮸",
-    "",
     "▸ Instant Auto-Delivery 24/7",
     "⤱ You must play 10 Quickplay or Draft games to unlock Ranked.",
     "⤱ Last Rank: The Account has never been ranked, but MMR is random.",
