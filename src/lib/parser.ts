@@ -12,6 +12,7 @@ export interface AccountData {
   skinsList: string[];
   riotPoints: number;
   blueEssence: number;
+  mythicEssence: number;
   orangeEssence: number;
   lastPlayDate: string;
   lastRank: string;
@@ -245,6 +246,7 @@ export async function parseAccountData(accountPath: string, files: string[]): Pr
     skinsList,
     riotPoints: extractNumber(allContent, /Riot\s+Points\s*[-:]\s*(\d+)/i),
     blueEssence: extractNumber(allContent, /Blue\s+Essence\s*[-:]\s*(\d+)/i),
+    mythicEssence: extractNumber(allContent, /Mythic\s+Essence\s*[-:]\s*(\d+)/i),
     orangeEssence: extractNumber(allContent, /Orange\s+Essence\s*[-:]\s*(\d+)/i),
     lastPlayDate: (() => {
       const match = allContent.match(/⤱\s*Last Play \/ Inactive From\s*-\s*(.+)/i);
@@ -344,6 +346,7 @@ export function generateDescription(data: AccountData): string {
     `◉ Skins - ${data.skinsCount}`,
     `◉ Riot Points - ${data.riotPoints}`,
     `◉ Blue Essence - ${data.blueEssence}`,
+    `◉ Mythic Essence - ${data.mythicEssence}`,
     `◉ Orange Essence - ${data.orangeEssence}`,
     "",
     "✓ Full Access [You can change the email, password, etc.]",
