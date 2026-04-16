@@ -15,6 +15,7 @@ export interface AccountData {
   orangeEssence: number;
   lastPlayDate: string;
   lastRank: string;
+  iconsList: string[];
   opggLink?: string;
 }
 
@@ -231,6 +232,7 @@ export async function parseAccountData(accountPath: string, files: string[]): Pr
   console.log("Список чемпионов:", championsList);
 
   const skinsList = extractList(allContent, "List of Skins:");
+  const iconsList = extractList(allContent, "List of Icons:");
   console.log("Список скинов:", skinsList);
 
   const data: AccountData = {
@@ -252,6 +254,7 @@ export async function parseAccountData(accountPath: string, files: string[]): Pr
       const match = allContent.match(/Previous Rank\s*-\s*(.+)/i);
       return match ? match[1].trim() : "";
     })(),
+    iconsList,
   };
 
   // Пытаемся найти ссылку OP.GG
@@ -361,6 +364,13 @@ export function generateDescription(data: AccountData): string {
     lines.push("");
     lines.push("◉ List of Skins:");
     lines.push(data.skinsList.join(", ") + ".");
+  }
+
+  // Добавляем список иконок
+  if (data.iconsList.length > 0) {
+    lines.push("");
+    lines.push("◉ List of Icons:");
+    lines.push(data.iconsList.join(", ") + ".");
   }
 
   return lines.join("\n");
