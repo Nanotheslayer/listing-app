@@ -336,7 +336,7 @@ export function generateDescription(data: AccountData): string {
   const lines: string[] = [
     "▸ Instant Auto-Delivery 24/7",
     "⤱ You must play 10 Quickplay or Draft games to unlock Ranked.",
-    `⤱ Last Rank: ${data.lastRank || "The Account has never been ranked, but MMR is random."}`,
+    `⤱ Last Rank: ${(data.lastRank && data.lastRank.toLowerCase() !== "unknown") ? data.lastRank : "The Account has never been ranked, but MMR is random."}`,
     "⤱ Current Rank: Unranked",
     `⤱ Last Play / Inactive From - ${data.lastPlayDate}`,
     "",
