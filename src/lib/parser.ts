@@ -356,6 +356,7 @@ export function generateDescription(data: AccountData): string {
   if (data.championsList.length > 0) {
     lines.push("");
     lines.push("◉ List of Champions:");
+    lines.push("");
     lines.push(data.championsList.join(", ") + ".");
   }
 
@@ -363,6 +364,7 @@ export function generateDescription(data: AccountData): string {
   if (data.skinsList.length > 0) {
     lines.push("");
     lines.push("◉ List of Skins:");
+    lines.push("");
     lines.push(data.skinsList.join(", ") + ".");
   }
 
@@ -370,6 +372,7 @@ export function generateDescription(data: AccountData): string {
   if (data.iconsList.length > 0) {
     lines.push("");
     lines.push("◉ List of Icons:");
+    lines.push("");
     lines.push(data.iconsList.join(", ") + ".");
   }
 
