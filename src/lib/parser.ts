@@ -12,9 +12,11 @@ export interface AccountData {
   skinsList: string[];
   riotPoints: number;
   blueEssence: number;
+  mythicEssence: number;
   orangeEssence: number;
   lastPlayDate: string;
   lastRank: string;
+  iconsList: string[];
   opggLink?: string;
 }
 
@@ -231,6 +233,7 @@ export async function parseAccountData(accountPath: string, files: string[]): Pr
   console.log("Список чемпионов:", championsList);
 
   const skinsList = extractList(allContent, "List of Skins:");
+  const iconsList = extractList(allContent, "List of Icons:");
   console.log("Список скинов:", skinsList);
 
   const data: AccountData = {
@@ -243,6 +246,7 @@ export async function parseAccountData(accountPath: string, files: string[]): Pr
     skinsList,
     riotPoints: extractNumber(allContent, /Riot\s+Points\s*[-:]\s*(\d+)/i),
     blueEssence: extractNumber(allContent, /Blue\s+Essence\s*[-:]\s*(\d+)/i),
+    mythicEssence: extractNumber(allContent, /Mythic\s+Essence\s*[-:]\s*(\d+)/i),
     orangeEssence: extractNumber(allContent, /Orange\s+Essence\s*[-:]\s*(\d+)/i),
     lastPlayDate: (() => {
       const match = allContent.match(/⤱\s*Last Play \/ Inactive From\s*-\s*(.+)/i);
@@ -252,6 +256,7 @@ export async function parseAccountData(accountPath: string, files: string[]): Pr
       const match = allContent.match(/Previous Rank\s*-\s*(.+)/i);
       return match ? match[1].trim() : "";
     })(),
+    iconsList,
   };
 
   // Пытаемся найти ссылку OP.GG
@@ -341,6 +346,7 @@ export function generateDescription(data: AccountData): string {
     `◉ Skins - ${data.skinsCount}`,
     `◉ Riot Points - ${data.riotPoints}`,
     `◉ Blue Essence - ${data.blueEssence}`,
+    `◉ Mythic Essence - ${data.mythicEssence}`,
     `◉ Orange Essence - ${data.orangeEssence}`,
     "",
     "✓ Full Access [You can change the email, password, etc.]",
@@ -353,6 +359,7 @@ export function generateDescription(data: AccountData): string {
   if (data.championsList.length > 0) {
     lines.push("");
     lines.push("◉ List of Champions:");
+    lines.push("");
     lines.push(data.championsList.join(", ") + ".");
   }
 
@@ -360,7 +367,16 @@ export function generateDescription(data: AccountData): string {
   if (data.skinsList.length > 0) {
     lines.push("");
     lines.push("◉ List of Skins:");
+    lines.push("");
     lines.push(data.skinsList.join(", ") + ".");
+  }
+
+  // Добавляем список иконок
+  if (data.iconsList.length > 0) {
+    lines.push("");
+    lines.push("◉ List of Icons:");
+    lines.push("");
+    lines.push(data.iconsList.join(", ") + ".");
   }
 
   return lines.join("\n");
