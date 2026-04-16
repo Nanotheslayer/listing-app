@@ -14,6 +14,7 @@ export interface AccountData {
   blueEssence: number;
   orangeEssence: number;
   lastPlayDate: string;
+  lastRank: string;
   opggLink?: string;
 }
 
@@ -247,6 +248,10 @@ export async function parseAccountData(accountPath: string, files: string[]): Pr
       const match = allContent.match(/⤱\s*Last Play \/ Inactive From\s*-\s*(.+)/i);
       return match ? match[1].trim() : "Unknown";
     })(),
+    lastRank: (() => {
+      const match = allContent.match(/Previous Rank\s*-\s*(.+)/i);
+      return match ? match[1].trim() : "";
+    })(),
   };
 
   // Пытаемся найти ссылку OP.GG
@@ -326,7 +331,7 @@ export function generateDescription(data: AccountData): string {
   const lines: string[] = [
     "▸ Instant Auto-Delivery 24/7",
     "⤱ You must play 10 Quickplay or Draft games to unlock Ranked.",
-    "⤱ Last Rank: The Account has never been ranked, but MMR is random.",
+    `⤱ Last Rank: ${data.lastRank || "The Account has never been ranked, but MMR is random."}`,
     "⤱ Current Rank: Unranked",
     `⤱ Last Play / Inactive From - ${data.lastPlayDate}`,
     "",
