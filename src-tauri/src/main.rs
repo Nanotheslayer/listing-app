@@ -15,6 +15,7 @@ mod g2g_api;
 mod config;
 
 use g2g_api::{G2GApiClient, G2GAuthTokens, SkinPrice};
+use std::sync::atomic::AtomicUsize;
 use config::{AppSettings, G2GSettings};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -477,116 +478,329 @@ async fn open_account_screenshot(account_path: String) -> Result<(), String> {
     }
 }
 
+// Tunables for the parallel price fetch pipeline.
+// Concurrency is intentionally conservative to avoid triggering G2G rate limits.
+const PRICE_FETCH_CONCURRENCY: usize = 3;
+// Cap total time per single skin including any 401 retry + refresh.
+const PRICE_FETCH_PER_SKIN_TIMEOUT_SECS: u64 = 45;
+// Minimum delay between individual requests (jitter applied on top).
+const PRICE_FETCH_MIN_DELAY_MS: u64 = 400;
+const PRICE_FETCH_MAX_DELAY_MS: u64 = 1200;
+
+// Cancellation-aware sleep so a cancel click aborts a pending delay immediately.
+async fn cancellable_sleep(duration_ms: u64, cancel_flag: &Arc<AtomicBool>) -> bool {
+    let start = std::time::Instant::now();
+    let total = std::time::Duration::from_millis(duration_ms);
+    loop {
+        if cancel_flag.load(Ordering::Relaxed) {
+            return true;
+        }
+        let elapsed = start.elapsed();
+        if elapsed >= total {
+            return false;
+        }
+        let remaining = total - elapsed;
+        let tick = remaining.min(std::time::Duration::from_millis(100));
+        tokio::time::sleep(tick).await;
+    }
+}
+
 #[tauri::command]
 async fn fetch_skin_prices(
     request: SkinPriceRequest,
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<SkinPriceResponse, String> {
     let total_skins = request.skins.len();
-    println!("Fetching prices for {} skins on server {}", total_skins, request.server);
+    println!(
+        "Fetching prices for {} skins on server {} (parallel, concurrency={})",
+        total_skins, request.server, PRICE_FETCH_CONCURRENCY
+    );
 
-    // 👇 НОВОЕ: Сброс флага отмены перед началом
+    // Reset cancellation flag before starting.
     state.cancel_price_calc.store(false, Ordering::Relaxed);
+
+    if total_skins == 0 {
+        return Ok(SkinPriceResponse {
+            prices: Vec::new(),
+            total_value: "$0.00".to_string(),
+            most_expensive: None,
+        });
+    }
 
     let g2g_settings = load_g2g_settings()
         .map_err(|e| format!("Не удалось загрузить настройки G2G: {}", e))?;
 
-    let tokens = G2GAuthTokens {
+    let tokens = Arc::new(G2GAuthTokens {
         user_id: g2g_settings.user_id.clone(),
         refresh_token: g2g_settings.refresh_token.clone(),
         long_lived_token: g2g_settings.long_lived_token.clone(),
         active_device_token: g2g_settings.active_device_token.clone(),
+    });
+
+    // Snapshot client state + refresh token once upfront so concurrent tasks
+    // don't need to hold the top-level Mutex<G2GApiClient>.
+    let (http_client, base_url, session_id, initial_token) = {
+        let mut client = state.g2g_client.lock().await;
+        if client.current_token().is_none() {
+            client
+                .refresh_token(&tokens)
+                .await
+                .map_err(|e| format!("Не удалось получить токен G2G: {}", e))?;
+        }
+        let token = client
+            .current_token()
+            .ok_or_else(|| "Не удалось получить токен G2G".to_string())?;
+        (
+            client.http_client(),
+            client.base_url_cloned(),
+            client.session_id_cloned(),
+            token,
+        )
     };
 
-    let mut prices = Vec::new();
+    // Shared token updated by whichever task first encounters a 401.
+    let shared_token = Arc::new(tokio::sync::RwLock::new(initial_token));
+    // Serializes refresh calls so concurrent 401s don't all hit /refresh_access.
+    let refresh_mutex = Arc::new(tokio::sync::Mutex::new(()));
+
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(PRICE_FETCH_CONCURRENCY));
+    let cancel_flag = state.cancel_price_calc.clone();
+    let completed = Arc::new(AtomicUsize::new(0));
+
+    let mut join_set: tokio::task::JoinSet<(usize, String, Result<String, String>)> =
+        tokio::task::JoinSet::new();
+
+    for (index, skin) in request.skins.iter().enumerate() {
+        let skin = skin.clone();
+        let server = request.server.clone();
+        let http_client = http_client.clone();
+        let base_url = base_url.clone();
+        let session_id = session_id.clone();
+        let shared_token = shared_token.clone();
+        let refresh_mutex = refresh_mutex.clone();
+        let tokens = tokens.clone();
+        let semaphore = semaphore.clone();
+        let cancel_flag = cancel_flag.clone();
+        let app_handle = app.clone();
+        let completed = completed.clone();
+
+        join_set.spawn(async move {
+            // Wait our turn in the concurrency queue.
+            let _permit = match semaphore.acquire_owned().await {
+                Ok(p) => p,
+                Err(e) => {
+                    return (index, skin, Err(format!("Semaphore closed: {}", e)));
+                }
+            };
+
+            if cancel_flag.load(Ordering::Relaxed) {
+                return (index, skin, Err("cancelled".to_string()));
+            }
+
+            // Small jitter so requests don't fire in perfectly synchronized bursts.
+            let delay_ms = rand::thread_rng()
+                .gen_range(PRICE_FETCH_MIN_DELAY_MS..PRICE_FETCH_MAX_DELAY_MS);
+            if cancellable_sleep(delay_ms, &cancel_flag).await {
+                return (index, skin, Err("cancelled".to_string()));
+            }
+
+            let done_so_far = completed.load(Ordering::Relaxed);
+            let _ = app_handle.emit(
+                "price-progress",
+                PriceProgressPayload {
+                    current: done_so_far + 1,
+                    total: total_skins,
+                    skin_name: skin.clone(),
+                    status: "processing".to_string(),
+                },
+            );
+
+            // Wrap the whole per-skin flow (including one 401 refresh+retry) in a
+            // single timeout so nothing can hang indefinitely.
+            let per_skin_result = tokio::time::timeout(
+                std::time::Duration::from_secs(PRICE_FETCH_PER_SKIN_TIMEOUT_SECS),
+                async {
+                    for attempt in 0..2u8 {
+                        let token_now = shared_token.read().await.clone();
+
+                        let search_res = g2g_api::search_skin_price_shared(
+                            &http_client,
+                            &base_url,
+                            &session_id,
+                            &token_now,
+                            &skin,
+                            &server,
+                        )
+                        .await;
+
+                        match search_res {
+                            Ok(price) => return Ok::<String, String>(price),
+                            Err(g2g_api::SkinSearchError::Unauthorized) if attempt == 0 => {
+                                // Only one task at a time should refresh.
+                                let _guard = refresh_mutex.lock().await;
+                                let current = shared_token.read().await.clone();
+                                if current == token_now {
+                                    println!(
+                                        "⚠️  401 on '{}', refreshing shared token…",
+                                        skin
+                                    );
+                                    let new_token = g2g_api::refresh_access_token_shared(
+                                        &http_client,
+                                        &base_url,
+                                        &session_id,
+                                        &tokens,
+                                    )
+                                    .await
+                                    .map_err(|e| format!("Token refresh failed: {}", e))?;
+                                    *shared_token.write().await = new_token;
+                                }
+                                // Loop and retry with the (now refreshed) token.
+                                continue;
+                            }
+                            Err(g2g_api::SkinSearchError::Unauthorized) => {
+                                return Err(
+                                    "Unauthorized after refresh attempt".to_string()
+                                );
+                            }
+                            Err(g2g_api::SkinSearchError::Other(e)) => {
+                                return Err(e);
+                            }
+                        }
+                    }
+                    Err("Exhausted retry attempts".to_string())
+                },
+            )
+            .await;
+
+            let price_result: Result<String, String> = match per_skin_result {
+                Ok(inner) => inner,
+                Err(_) => Err(format!(
+                    "Timed out after {}s",
+                    PRICE_FETCH_PER_SKIN_TIMEOUT_SECS
+                )),
+            };
+
+            let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+            let status = if price_result.is_ok() { "completed" } else { "error" };
+            let _ = app_handle.emit(
+                "price-progress",
+                PriceProgressPayload {
+                    current: done,
+                    total: total_skins,
+                    skin_name: skin.clone(),
+                    status: status.to_string(),
+                },
+            );
+
+            (index, skin, price_result)
+        });
+    }
+
+    // Collect results as they complete; abort in-flight tasks as soon as the
+    // user clicks cancel, rather than waiting for the next natural completion.
+    let mut raw_results: Vec<(usize, String, Result<String, String>)> =
+        Vec::with_capacity(total_skins);
+    let mut was_cancelled = false;
+
+    loop {
+        if !was_cancelled && cancel_flag.load(Ordering::Relaxed) {
+            was_cancelled = true;
+            println!("🛑 Cancellation requested — aborting remaining tasks");
+            join_set.abort_all();
+        }
+
+        // Race between "a task finished" and "cancel flag flipped".
+        let next = tokio::select! {
+            joined = join_set.join_next() => joined,
+            _ = async {
+                // Poll the cancel flag a few times per second. Cheap and avoids
+                // needing an extra Notify channel wired through every task.
+                while !cancel_flag.load(Ordering::Relaxed) {
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                }
+            }, if !was_cancelled => {
+                // Loop around so the check at the top runs abort_all().
+                continue;
+            }
+        };
+
+        match next {
+            Some(Ok(tuple)) => raw_results.push(tuple),
+            Some(Err(e)) => {
+                // JoinError — either panic or aborted task. Safe to skip.
+                if !e.is_cancelled() {
+                    println!("⚠️  Task join error: {}", e);
+                }
+            }
+            None => break,
+        }
+    }
+
+    // Propagate the cancelled state to the shared token on the client so the
+    // next command re-refreshes if needed (token may still be valid, but keeping
+    // it is fine).
+    {
+        let mut client = state.g2g_client.lock().await;
+        client.set_current_token(Some(shared_token.read().await.clone()));
+    }
+
+    if was_cancelled {
+        let _ = app.emit(
+            "price-progress",
+            PriceProgressPayload {
+                current: completed.load(Ordering::Relaxed),
+                total: total_skins,
+                skin_name: "Cancelled".to_string(),
+                status: "cancelled".to_string(),
+            },
+        );
+        return Err("Price calculation cancelled by user".to_string());
+    }
+
+    // Restore original input order so the output matches what the user sent.
+    raw_results.sort_by_key(|(idx, _, _)| *idx);
+
+    let mut prices = Vec::with_capacity(raw_results.len());
     let mut total_value = 0.0;
     let mut most_expensive: Option<SkinPrice> = None;
     let mut max_price = 0.0;
 
-    for (index, skin) in request.skins.iter().enumerate() {
-        // 👇 НОВОЕ: Проверка флага отмены
-        if state.cancel_price_calc.load(Ordering::Relaxed) {
-            println!("🛑 Price calculation cancelled by user");
-
-            let _ = app.emit("price-progress", PriceProgressPayload {
-                current: index + 1,
-                total: total_skins,
-                skin_name: "Cancelled".to_string(),
-                status: "cancelled".to_string(),
-            });
-
-            return Err("Price calculation cancelled by user".to_string());
-        }
-
-        let current = index + 1;
-
-        let _ = app.emit("price-progress", PriceProgressPayload {
-            current,
-            total: total_skins,
-            skin_name: skin.clone(),
-            status: "processing".to_string(),
-        });
-
-        println!("Fetching price for: {}", skin);
-
-        let mut client = state.g2g_client.lock().await;
-        let price_result = client.fetch_skin_price(skin, &request.server, &tokens).await;
-        drop(client);
-
-        match price_result {
-            Ok(price_str) => {
-                let numeric_price = if price_str.starts_with("$") || price_str.starts_with("~$") {
-                    price_str.trim_start_matches('~').trim_start_matches('$')
-                        .parse::<f64>().ok().unwrap_or(0.0)
-                } else {
-                    0.0
-                };
-
-                if numeric_price > 0.0 {
-                    total_value += numeric_price;
-
-                    if numeric_price > max_price {
-                        max_price = numeric_price;
-                        most_expensive = Some(SkinPrice {
-                            skin_name: skin.clone(),
-                            price: price_str.clone(),
-                        });
-                    }
-                }
-
-                prices.push(SkinPrice {
-                    skin_name: skin.clone(),
-                    price: price_str,
-                });
-
-                let _ = app.emit("price-progress", PriceProgressPayload {
-                    current,
-                    total: total_skins,
-                    skin_name: skin.clone(),
-                    status: "completed".to_string(),
-                });
-            }
+    for (_, skin, result) in raw_results {
+        let price_str = match result {
+            Ok(p) => p,
             Err(e) => {
                 println!("Error fetching price for {}: {}", skin, e);
-                prices.push(SkinPrice {
-                    skin_name: skin.clone(),
-                    price: "Error".to_string(),
-                });
+                "Error".to_string()
+            }
+        };
 
-                let _ = app.emit("price-progress", PriceProgressPayload {
-                    current,
-                    total: total_skins,
+        let numeric_price = if price_str.starts_with('$') || price_str.starts_with("~$") {
+            price_str
+                .trim_start_matches('~')
+                .trim_start_matches('$')
+                .parse::<f64>()
+                .ok()
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+
+        if numeric_price > 0.0 {
+            total_value += numeric_price;
+            if numeric_price > max_price {
+                max_price = numeric_price;
+                most_expensive = Some(SkinPrice {
                     skin_name: skin.clone(),
-                    status: "error".to_string(),
+                    price: price_str.clone(),
                 });
             }
         }
 
-        if current < total_skins {
-            let delay_ms = rand::thread_rng().gen_range(2000..3500);
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-        }
+        prices.push(SkinPrice {
+            skin_name: skin,
+            price: price_str,
+        });
     }
 
     Ok(SkinPriceResponse {
