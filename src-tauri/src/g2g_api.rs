@@ -97,6 +97,29 @@ impl G2GApiClient {
         }
     }
 
+    // Accessors used by the parallel price fetch pipeline in main.rs.
+    // These expose client internals so that concurrent tasks can run without
+    // holding the top-level Mutex<G2GApiClient> for the whole batch.
+    pub fn http_client(&self) -> reqwest::Client {
+        self.client.clone()
+    }
+
+    pub fn base_url_cloned(&self) -> String {
+        self.base_url.clone()
+    }
+
+    pub fn session_id_cloned(&self) -> String {
+        self.session_id.clone()
+    }
+
+    pub fn current_token(&self) -> Option<String> {
+        self.current_token.clone()
+    }
+
+    pub fn set_current_token(&mut self, token: Option<String>) {
+        self.current_token = token;
+    }
+
     fn generate_session_id() -> String {
         let mut rng = rand::thread_rng();
         (0..32)
@@ -926,5 +949,214 @@ impl G2GApiClient {
                 dataset_id: self.get_skins_id(skins_count).to_string(),
             },
         ]
+    }
+}
+
+// --- Shared helpers used by the parallel price-fetch pipeline ---
+
+#[derive(Debug)]
+pub enum SkinSearchError {
+    Unauthorized,
+    Other(String),
+}
+
+fn build_browser_headers_shared(
+    session_id: &str,
+    access_token: Option<&str>,
+) -> reqwest::header::HeaderMap {
+    let mut headers = reqwest::header::HeaderMap::new();
+
+    headers.insert("Accept", "application/json, text/plain, */*".parse().unwrap());
+    headers.insert("Accept-Language", "en-US,en;q=0.9".parse().unwrap());
+    headers.insert("Accept-Encoding", "gzip, deflate, br".parse().unwrap());
+    headers.insert("Connection", "keep-alive".parse().unwrap());
+    headers.insert("Content-Type", "application/json".parse().unwrap());
+    headers.insert("Cache-Control", "no-cache".parse().unwrap());
+    headers.insert("Pragma", "no-cache".parse().unwrap());
+    headers.insert("Origin", "https://www.g2g.com".parse().unwrap());
+
+    let referer = format!("https://www.g2g.com/sellerhub?session_id={}", session_id);
+    headers.insert("Referer", referer.parse().unwrap());
+
+    headers.insert("Sec-Ch-Ua", "\"Not A(Brand\";v=\"99\", \"Google Chrome\";v=\"123\", \"Chromium\";v=\"123\"".parse().unwrap());
+    headers.insert("Sec-Ch-Ua-Mobile", "?0".parse().unwrap());
+    headers.insert("Sec-Ch-Ua-Platform", "\"Windows\"".parse().unwrap());
+
+    headers.insert("Sec-Fetch-Dest", "empty".parse().unwrap());
+    headers.insert("Sec-Fetch-Mode", "cors".parse().unwrap());
+    headers.insert("Sec-Fetch-Site", "same-site".parse().unwrap());
+
+    match access_token {
+        Some(token) => {
+            headers.insert("Authorization", token.parse().unwrap());
+        }
+        None => {
+            headers.insert("Authorization", "null".parse().unwrap());
+        }
+    }
+
+    headers
+}
+
+fn map_server_filter(server: &str) -> &'static str {
+    match server {
+        "EUW" | "Europe West" => "e80c30d1:304244a1%7C319340f0:65ec9642",
+        "EUNE" | "Europe Nordic & East" => "e80c30d1:1a87dd85%7C319340f0:65ec9642",
+        "NA" | "North America" | "NA1" => "e80c30d1:e2f2c55b%7C319340f0:65ec9642",
+        "BR" | "BR1" | "Brazil" => "e80c30d1:31e5d298%7C319340f0:65ec9642",
+        "LAN" => "e80c30d1:302ba1e6%7C319340f0:65ec9642",
+        "LAS" => "e80c30d1:f28899f5%7C319340f0:65ec9642",
+        "OCE" | "Oceania" => "e80c30d1:5c030fef%7C319340f0:65ec9642",
+        "TR" | "Turkey" => "e80c30d1:2247e703%7C319340f0:65ec9642",
+        "RU" | "Russia" => "319340f0:65ec9642%7Ce80c30d1:d94d8d49",
+        "JP" | "Japan" => "e80c30d1:e9926686%7C319340f0:65ec9642",
+        "KR" | "Korea" => "319340f0:65ec9642%7Ce80c30d1:a7bb0eb5",
+        _ => "e80c30d1:1a87dd85%7C319340f0:65ec9642",
+    }
+}
+
+// Single-skin search that takes its state by value — safe to run concurrently.
+pub async fn search_skin_price_shared(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    session_id: &str,
+    access_token: &str,
+    skin_name: &str,
+    server: &str,
+) -> Result<String, SkinSearchError> {
+    let server_filter = map_server_filter(server);
+    let encoded_skin = urlencoding::encode(skin_name);
+    let search_url = format!(
+        "{}/offer/search?seo_term=league-of-legends-account&q={}&sort=lowest_price&filter_attr={}&page_size=48&currency=USD&country=RU&include_localization=0",
+        base_url, encoded_skin, server_filter
+    );
+
+    let headers = build_browser_headers_shared(session_id, Some(access_token));
+
+    let response = http_client
+        .get(&search_url)
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|e| SkinSearchError::Other(format!("Search request failed: {}", e)))?;
+
+    let status = response.status();
+
+    if status == 401 {
+        return Err(SkinSearchError::Unauthorized);
+    }
+
+    if !status.is_success() {
+        return Err(SkinSearchError::Other(format!(
+            "Search failed with status: {}",
+            status
+        )));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| SkinSearchError::Other(format!("Failed to read response bytes: {}", e)))?;
+
+    let decoded_bytes = if bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
+        let mut decoder = GzDecoder::new(&bytes[..]);
+        let mut decoded = Vec::new();
+        decoder
+            .read_to_end(&mut decoded)
+            .map_err(|e| SkinSearchError::Other(format!("Failed to decompress gzip: {}", e)))?;
+        decoded
+    } else {
+        bytes.to_vec()
+    };
+
+    let json: SearchResponse = serde_json::from_slice(&decoded_bytes).map_err(|e| {
+        let preview = String::from_utf8_lossy(&decoded_bytes[..decoded_bytes.len().min(200)]);
+        SkinSearchError::Other(format!("Failed to parse JSON: {} | Preview: {}", e, preview))
+    })?;
+
+    let skin_lower = skin_name.to_lowercase();
+
+    let matching_results: Vec<_> = json
+        .payload
+        .results
+        .iter()
+        .filter(|result| {
+            let desc_match = result
+                .description
+                .as_ref()
+                .map(|d| d.to_lowercase().contains(&skin_lower))
+                .unwrap_or(false);
+            let title_match = result
+                .title
+                .as_ref()
+                .map(|t| t.to_lowercase().contains(&skin_lower))
+                .unwrap_or(false);
+            desc_match || title_match
+        })
+        .collect();
+
+    if matching_results.is_empty() {
+        if !json.payload.results.is_empty() {
+            let min_price = json
+                .payload
+                .results
+                .iter()
+                .map(|r| r.converted_unit_price)
+                .fold(f64::INFINITY, f64::min);
+            Ok(format!("~${:.2}", min_price))
+        } else {
+            Ok("No offers".to_string())
+        }
+    } else {
+        let min_price = matching_results
+            .iter()
+            .map(|r| r.converted_unit_price)
+            .fold(f64::INFINITY, f64::min);
+        Ok(format!("${:.2}", min_price))
+    }
+}
+
+// Shared refresh that doesn't mutate a client — returns the new access token.
+pub async fn refresh_access_token_shared(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    session_id: &str,
+    tokens: &G2GAuthTokens,
+) -> Result<String, String> {
+    let url = format!("{}/user/refresh_access", base_url);
+
+    let mut body = HashMap::new();
+    body.insert("user_id", &tokens.user_id);
+    body.insert("refresh_token", &tokens.refresh_token);
+    body.insert("active_device_token", &tokens.active_device_token);
+    body.insert("long_lived_token", &tokens.long_lived_token);
+
+    let headers = build_browser_headers_shared(session_id, None);
+
+    let response = http_client
+        .post(&url)
+        .headers(headers)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Refresh request failed: {}", e))?;
+
+    let status = response.status();
+
+    if status.is_success() {
+        let json: RefreshResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse refresh response: {}", e))?;
+        Ok(json.payload.access_token)
+    } else {
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unable to read error body".to_string());
+        Err(format!(
+            "Failed to refresh token: {} - {}",
+            status, error_body
+        ))
     }
 }
