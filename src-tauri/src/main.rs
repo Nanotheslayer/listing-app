@@ -124,7 +124,12 @@ fn extract_login(text: &str) -> Option<String> {
 
 // Отправляет строку о выставленном оффере в Google-таблицу (best-effort).
 // Любая ошибка логируется, но не прерывает процесс выставления.
-async fn sync_offer_to_sheet(raw_content: &str, account_name: &str, offer_id: &str) {
+async fn sync_offer_to_sheet(
+    raw_content: &str,
+    account_name: &str,
+    account_path: &str,
+    offer_id: &str,
+) {
     let webhook_url = match load_sheets_webhook() {
         Some(url) => url,
         None => {
@@ -136,10 +141,17 @@ async fn sync_offer_to_sheet(raw_content: &str, account_name: &str, offer_id: &s
     // Username = Login из файла аккаунта; если не найден, используем имя папки.
     let username = extract_login(raw_content).unwrap_or_else(|| account_name.to_string());
 
+    // Folder = полный путь родительской папки (где лежит папка аккаунта).
+    let folder = PathBuf::from(account_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
     let row = sheets::SheetRow {
         username,
         offer_id: offer_id.to_string(),
         listed_date: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        folder,
         status: "Active".to_string(),
     };
 
@@ -310,7 +322,7 @@ async fn create_g2g_offer(
 
     // Записываем строку в Google-таблицу (если веб-хук настроен). Best-effort:
     // ошибка записи в таблицу не должна отменять уже созданный оффер.
-    sync_offer_to_sheet(&raw_content, &request.account_name, &offer_id).await;
+    sync_offer_to_sheet(&raw_content, &request.account_name, &request.account_path, &offer_id).await;
 
     Ok(offer_id)
 }
@@ -951,7 +963,7 @@ async fn create_listing(
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();
-    sync_offer_to_sheet(&personal_info, &account_name, &offer_id).await;
+    sync_offer_to_sheet(&personal_info, &account_name, &account_path, &offer_id).await;
 
     Ok(offer_id)
 }
