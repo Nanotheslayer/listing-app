@@ -37,77 +37,121 @@
 ### Шаг 2. Вставь скрипт
 
 ```javascript
-// Название листа (вкладки), в который писать. Поставь имя своей вкладки.
-// Если оставить пустым, скрипт возьмёт первый лист таблицы.
-const SHEET_NAME = '';
-
 // Названия колонок в таблице (как в строке заголовков). Регистр не важен.
 const COL_USERNAME = 'Username';
 const COL_OFFER_ID = 'Offer ID';
 const COL_LISTED_DATE = 'Listed Date';
 const COL_STATUS = 'Status';
 
+// Сколько верхних строк просматривать в поисках строки заголовков.
+const HEADER_SCAN_ROWS = 5;
+
+// Находит лист и строку заголовков, где есть все 4 нужные колонки.
+// Перебирает ВСЕ вкладки, чтобы не зависеть от их порядка/имени.
+function findTarget_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const wanted = [COL_USERNAME, COL_OFFER_ID, COL_LISTED_DATE, COL_STATUS]
+    .map(s => s.toLowerCase());
+
+  const sheets = ss.getSheets();
+  for (let s = 0; s < sheets.length; s++) {
+    const sheet = sheets[s];
+    const lastCol = sheet.getLastColumn();
+    if (lastCol === 0) continue;
+    const scanRows = Math.min(HEADER_SCAN_ROWS, Math.max(1, sheet.getLastRow()));
+    const grid = sheet.getRange(1, 1, scanRows, lastCol).getValues();
+
+    for (let r = 0; r < grid.length; r++) {
+      const colIndex = {};
+      grid[r].forEach((h, i) => {
+        const key = String(h).trim().toLowerCase();
+        if (key) colIndex[key] = i + 1; // 1-based
+      });
+      const found = wanted.every(w => colIndex[w]);
+      if (found) {
+        return {
+          sheet: sheet,
+          headerRow: r + 1, // 1-based
+          cUser: colIndex[COL_USERNAME.toLowerCase()],
+          cOffer: colIndex[COL_OFFER_ID.toLowerCase()],
+          cDate: colIndex[COL_LISTED_DATE.toLowerCase()],
+          cStatus: colIndex[COL_STATUS.toLowerCase()],
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function writeRow_(data) {
+  const t = findTarget_();
+  if (!t) {
+    return {
+      ok: false,
+      error: 'Не найдена вкладка со всеми колонками: ' +
+        [COL_USERNAME, COL_OFFER_ID, COL_LISTED_DATE, COL_STATUS].join(', ') +
+        '. Проверь, что заголовки написаны точно так же (в первых ' +
+        HEADER_SCAN_ROWS + ' строках любой вкладки).'
+    };
+  }
+
+  const sheet = t.sheet;
+  const lastRow = sheet.getLastRow();
+
+  // Ищем существующую строку с таким Username и пустым Offer ID — заполним её.
+  let targetRow = -1;
+  if (lastRow > t.headerRow) {
+    const n = lastRow - t.headerRow;
+    const usernames = sheet.getRange(t.headerRow + 1, t.cUser, n, 1).getValues();
+    const offers = sheet.getRange(t.headerRow + 1, t.cOffer, n, 1).getValues();
+    const wantUser = String(data.username || '').trim().toLowerCase();
+    for (let i = 0; i < n; i++) {
+      const u = String(usernames[i][0]).trim().toLowerCase();
+      const o = String(offers[i][0]).trim();
+      if (u && u === wantUser && o === '') {
+        targetRow = t.headerRow + 1 + i;
+        break;
+      }
+    }
+  }
+
+  if (targetRow === -1) {
+    targetRow = lastRow + 1; // добавляем новую строку в конец
+    sheet.getRange(targetRow, t.cUser).setValue(data.username || '');
+  }
+
+  sheet.getRange(targetRow, t.cOffer).setValue(data.offer_id || '');
+  sheet.getRange(targetRow, t.cDate).setValue(data.listed_date || '');
+  sheet.getRange(targetRow, t.cStatus).setValue(data.status || '');
+
+  return { ok: true, sheet: sheet.getName(), headerRow: t.headerRow, row: targetRow };
+}
+
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = SHEET_NAME ? ss.getSheetByName(SHEET_NAME) : ss.getSheets()[0];
-    if (!sheet) {
-      return json_({ ok: false, error: 'Sheet not found: ' + SHEET_NAME });
-    }
-
-    // Читаем заголовки и строим карту "имя колонки -> номер столбца".
-    const lastCol = sheet.getLastColumn();
-    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-    const colIndex = {};
-    headers.forEach((h, i) => {
-      colIndex[String(h).trim().toLowerCase()] = i + 1; // 1-based
-    });
-
-    const cUser = colIndex[COL_USERNAME.toLowerCase()];
-    const cOffer = colIndex[COL_OFFER_ID.toLowerCase()];
-    const cDate = colIndex[COL_LISTED_DATE.toLowerCase()];
-    const cStatus = colIndex[COL_STATUS.toLowerCase()];
-
-    if (!cUser || !cOffer || !cDate || !cStatus) {
-      return json_({
-        ok: false,
-        error: 'Не найдены колонки. Проверь заголовки: ' +
-               [COL_USERNAME, COL_OFFER_ID, COL_LISTED_DATE, COL_STATUS].join(', ')
-      });
-    }
-
-    // Ищем существующую строку с таким Username и пустым Offer ID.
-    let targetRow = -1;
-    const lastRow = sheet.getLastRow();
-    if (lastRow >= 2) {
-      const usernames = sheet.getRange(2, cUser, lastRow - 1, 1).getValues();
-      const offers = sheet.getRange(2, cOffer, lastRow - 1, 1).getValues();
-      for (let i = 0; i < usernames.length; i++) {
-        const u = String(usernames[i][0]).trim().toLowerCase();
-        const o = String(offers[i][0]).trim();
-        if (u && u === String(data.username).trim().toLowerCase() && o === '') {
-          targetRow = i + 2; // +2: строка 1 — заголовки, индекс с 0
-          break;
-        }
-      }
-    }
-
-    if (targetRow === -1) {
-      // Новой строки нет — добавляем в конец.
-      targetRow = lastRow + 1;
-      sheet.getRange(targetRow, cUser).setValue(data.username || '');
-    }
-
-    sheet.getRange(targetRow, cOffer).setValue(data.offer_id || '');
-    sheet.getRange(targetRow, cDate).setValue(data.listed_date || '');
-    sheet.getRange(targetRow, cStatus).setValue(data.status || '');
-
-    return json_({ ok: true, row: targetRow });
+    const result = writeRow_(data);
+    Logger.log(JSON.stringify(result));
+    return json_(result);
   } catch (err) {
+    Logger.log('ERROR: ' + err);
     return json_({ ok: false, error: String(err) });
   }
+}
+
+// Тест прямо из браузера: открой URL веб-приложения с ?test=1 в адресной строке.
+// В таблицу запишется строка с username "TEST".
+function doGet(e) {
+  if (e && e.parameter && e.parameter.test) {
+    const result = writeRow_({
+      username: 'TEST',
+      offer_id: 'TEST-OFFER',
+      listed_date: new Date().toISOString(),
+      status: 'TEST'
+    });
+    return json_(result);
+  }
+  return json_({ ok: true, message: 'Webhook is alive. Add ?test=1 to write a test row.' });
 }
 
 function json_(obj) {
@@ -117,9 +161,9 @@ function json_(obj) {
 }
 ```
 
-При необходимости поменяй константы вверху:
-- `SHEET_NAME` — имя вкладки (если в файле несколько листов);
-- `COL_*` — если твои колонки называются иначе.
+При необходимости поменяй названия колонок в константах `COL_*` вверху, если у тебя
+они называются иначе. Имя вкладки указывать **не нужно** — скрипт сам найдёт вкладку,
+в которой есть все 4 заголовка.
 
 ### Шаг 3. Опубликуй как веб-приложение
 
@@ -138,6 +182,36 @@ function json_(obj) {
 3. Сохрани настройки.
 
 Готово. Теперь при каждом успешном выставлении строка в таблице заполняется автоматически.
+
+## Диагностика: «выполнение завершено, но строки нет»
+
+Если в логах Apps Script видно `doPost` и «Выполнение завершено», но в таблице
+ничего не появилось — значит скрипт отработал, но не записал. Проверь по порядку:
+
+1. **Обнови развёртывание после замены кода.** Это самое частое. После любой правки
+   кода нужно: **Deploy → Manage deployments → ✎ (Edit) → Version: New version → Deploy**.
+   Без этого работает старая версия скрипта. URL при этом остаётся прежним.
+
+2. **Проверь через браузер.** Открой URL веб-приложения, дописав в конец `?test=1`:
+   `https://script.google.com/macros/s/AKfy.../exec?test=1`
+   - Ответ `{"ok":true,"sheet":"...","row":N}` — запись прошла, в таблице появилась
+     тестовая строка `TEST` на вкладке `sheet`. Значит механика рабочая.
+   - Ответ `{"ok":false,"error":"Не найдена вкладка со всеми колонками..."}` — скрипт
+     не нашёл заголовки. Убедись, что в одной из вкладок в первых строках есть ровно
+     колонки `Username`, `Offer ID`, `Listed Date`, `Status` (проверь точное написание
+     и лишние пробелы). При других названиях поправь константы `COL_*` вверху скрипта.
+
+3. **Смотри ответ в логах.** Новый скрипт логирует результат: **Executions →** открой
+   запись `doPost` → в деталях будет JSON с `ok`, именем вкладки и номером строки.
+   Если `ok:false` — там же причина.
+
+4. **Куда именно записалось.** Скрипт сам выбирает вкладку, где есть все 4 заголовка
+   (перебирает все вкладки, первые `HEADER_SCAN_ROWS` строк). Проверь все вкладки —
+   возможно, данные ушли в другую, чем ты смотришь.
+
+5. **Логика заполнения.** Если в таблице уже есть строка с таким же `Username` и
+   **пустым** `Offer ID`, скрипт заполнит именно её, а не добавит новую. Если хочешь
+   всегда добавлять новую строку — скажи, уберу этот поиск.
 
 ## Замечания
 
