@@ -13,6 +13,9 @@
   let longLivedToken = $state("");
   let activeDeviceToken = $state("");
 
+  // Google Sheets
+  let sheetsWebhookUrl = $state("");
+
   // Флаги видимости токенов
   let showRefreshToken = $state(false);
   let showLongLivedToken = $state(false);
@@ -31,6 +34,8 @@
         refreshToken = settings.g2g.refresh_token || "";
         longLivedToken = settings.g2g.long_lived_token || "";
         activeDeviceToken = settings.g2g.active_device_token || "";
+
+        sheetsWebhookUrl = settings.sheets?.webhook_url || "";
 
         console.log("✅ Settings loaded");
       }
@@ -60,9 +65,12 @@
       return;
     }
 
+    const trimmedWebhook = sheetsWebhookUrl.trim();
+
     try {
       await settingsManager.saveSettings({
         g2g: g2gSettings,
+        ...(trimmedWebhook ? { sheets: { webhook_url: trimmedWebhook } } : {}),
       });
 
       statusMessage = "✅ Настройки успешно сохранены!";
@@ -94,6 +102,7 @@
       refreshToken = "";
       longLivedToken = "";
       activeDeviceToken = "";
+      sheetsWebhookUrl = "";
 
       statusMessage = "✅ Настройки успешно удалены";
       messageType = "success";
@@ -259,6 +268,24 @@
                 </ol>
               </div>
             </div>
+          </div>
+
+          <!-- Google Sheets Webhook -->
+          <div class="pt-2 border-t border-gray-700">
+            <label class="block text-sm font-semibold text-gray-300 mb-2 mt-4">
+              📊 Google Sheets Webhook URL
+            </label>
+            <input
+              type="text"
+              bind:value={sheetsWebhookUrl}
+              placeholder="https://script.google.com/macros/s/.../exec"
+              class="w-full px-4 py-3 bg-gray-900/50 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition"
+            />
+            <p class="mt-2 text-xs text-gray-400">
+              Необязательно. URL веб-приложения Google Apps Script. После выставления
+              аккаунта в таблицу автоматически записываются Username, Offer ID, Listed Date и Status.
+              Оставьте пустым, чтобы отключить запись в таблицу.
+            </p>
           </div>
 
           <!-- Кнопки действий -->

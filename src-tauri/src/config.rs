@@ -11,10 +11,18 @@ pub struct G2GSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SheetsSettings {
+    /// URL веб-хука Google Apps Script, в который отправляется строка после выставления.
+    pub webhook_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub g2g: G2GSettings,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheets: Option<SheetsSettings>,
 }
 
 impl G2GSettings {

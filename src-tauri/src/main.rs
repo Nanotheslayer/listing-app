@@ -13,6 +13,7 @@ use chrono;
 
 mod g2g_api;
 mod config;
+mod sheets;
 
 use g2g_api::{G2GApiClient, G2GAuthTokens, SkinPrice};
 use std::sync::atomic::AtomicUsize;
@@ -93,6 +94,58 @@ fn load_g2g_settings() -> Result<G2GSettings, String> {
                     "G2G токены не настроены. Перейдите в настройки приложения.".to_string()
                 })
         }
+    }
+}
+
+// Загружает URL веб-хука Google Sheets из настроек (если задан и не пустой).
+fn load_sheets_webhook() -> Option<String> {
+    let settings = AppSettings::load().ok()?;
+    let url = settings.sheets?.webhook_url.trim().to_string();
+    if url.is_empty() {
+        None
+    } else {
+        Some(url)
+    }
+}
+
+// Извлекает логин аккаунта (строка "Login:") из текста файла аккаунта.
+fn extract_login(text: &str) -> Option<String> {
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with("Login:") {
+            let login = line.replace("Login:", "").trim().to_string();
+            if !login.is_empty() {
+                return Some(login);
+            }
+        }
+    }
+    None
+}
+
+// Отправляет строку о выставленном оффере в Google-таблицу (best-effort).
+// Любая ошибка логируется, но не прерывает процесс выставления.
+async fn sync_offer_to_sheet(raw_content: &str, account_name: &str, offer_id: &str) {
+    let webhook_url = match load_sheets_webhook() {
+        Some(url) => url,
+        None => {
+            println!("ℹ️  Google Sheets webhook не настроен — пропускаем запись в таблицу");
+            return;
+        }
+    };
+
+    // Username = Login из файла аккаунта; если не найден, используем имя папки.
+    let username = extract_login(raw_content).unwrap_or_else(|| account_name.to_string());
+
+    let row = sheets::SheetRow {
+        username,
+        offer_id: offer_id.to_string(),
+        listed_date: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        status: "Live".to_string(),
+    };
+
+    match sheets::append_row(&webhook_url, &row).await {
+        Ok(()) => println!("✅ Listing written to Google Sheet"),
+        Err(e) => println!("⚠️  Не удалось записать в Google-таблицу: {}", e),
     }
 }
 
@@ -254,6 +307,10 @@ async fn create_g2g_offer(
     println!("✅ Offer created with data! ID: {}", offer_id);
 
     save_offer_id_to_file(&request.account_path, &offer_id)?;
+
+    // Записываем строку в Google-таблицу (если веб-хук настроен). Best-effort:
+    // ошибка записи в таблицу не должна отменять уже созданный оффер.
+    sync_offer_to_sheet(&raw_content, &request.account_name, &offer_id).await;
 
     Ok(offer_id)
 }
@@ -888,6 +945,14 @@ async fn create_listing(
 
     save_offer_id_to_file(&account_path, &offer_id)?;
 
+    // Имя аккаунта — это имя папки в account_path (для fallback Username).
+    let account_name = PathBuf::from(&account_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    sync_offer_to_sheet(&personal_info, &account_name, &offer_id).await;
+
     Ok(offer_id)
 }
 
@@ -984,6 +1049,7 @@ async fn load_settings() -> Result<AppSettings, String> {
                 Ok(AppSettings {
                     g2g: g2g_settings,
                     theme: None,
+                    sheets: None,
                 })
             } else {
                 Err(e)

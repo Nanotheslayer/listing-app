@@ -8,9 +8,14 @@ export interface G2GSettings {
   active_device_token: string;
 }
 
+export interface SheetsSettings {
+  webhook_url: string;
+}
+
 export interface AppSettings {
   g2g: G2GSettings;
   theme?: "dark" | "light";
+  sheets?: SheetsSettings;
 }
 
 // Класс для управления настройками
