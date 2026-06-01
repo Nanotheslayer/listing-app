@@ -1,7 +1,8 @@
 # Автозаполнение Google-таблицы при выставлении
 
 После успешного выставления аккаунта приложение может автоматически записывать
-в твою Google-таблицу четыре поля: **Username**, **Offer ID**, **Listed Date** и **Status**.
+в твою Google-таблицу поля: **Username**, **Offer ID**, **Listed Data**, **Status**
+и (если такая колонка есть) **Folder**.
 
 Запись работает через веб-хук **Google Apps Script** — это самый простой способ
 для десктопного приложения: не нужно хранить ключи Google внутри приложения и
@@ -16,15 +17,20 @@
      "username": "логин аккаунта (поле Login: из файла)",
      "offer_id": "G17...",
      "listed_date": "2026-06-01 14:32:05",
-     "status": "Live"
+     "folder": "C:\\Users\\...\\Акки с перекупа\\RESELL\\16.01.26",
+     "status": "Active"
    }
    ```
 2. Скрипт Apps Script находит нужные колонки по их заголовкам и:
    - если в таблице уже есть строка с таким **Username** и пустым **Offer ID** — заполняет её;
    - иначе добавляет новую строку в конец.
+3. В колонку **Status** записывается `Active`. Для новой строки скрипт ставит
+   на ячейку выпадающий список (`Active` / `Sold`) — копируя его из существующих
+   строк, — чтобы значение можно было переключать на `Sold` через меню вручную.
 
 > **Username** берётся из строки `Login:` в текстовом файле аккаунта. Если её нет,
-> используется имя папки аккаунта.
+> используется имя папки аккаунта. **Folder** — это полный путь родительской папки,
+> в которой лежит папка аккаунта; записывается только если в таблице есть колонка `Folder`.
 
 ## Настройка (один раз)
 
@@ -43,6 +49,11 @@ const COL_USERNAME = ['Username'];
 const COL_OFFER_ID = ['Offer ID'];
 const COL_LISTED_DATE = ['Listed Data', 'Listed Date'];
 const COL_STATUS = ['Status'];
+const COL_FOLDER = ['Folder']; // необязательная колонка — заполняется, если есть
+
+// Варианты значений для выпадающего списка в колонке Status (если в новой
+// строке выпадашки ещё нет, скрипт создаст её с этими вариантами).
+const STATUS_OPTIONS = ['Active', 'Sold'];
 
 // Сколько верхних строк просматривать в поисках строки заголовков.
 const HEADER_SCAN_ROWS = 5;
@@ -78,8 +89,9 @@ function findTarget_() {
       const cOffer = pickCol_(colIndex, COL_OFFER_ID);
       const cDate = pickCol_(colIndex, COL_LISTED_DATE);
       const cStatus = pickCol_(colIndex, COL_STATUS);
+      const cFolder = pickCol_(colIndex, COL_FOLDER); // может отсутствовать
       if (cUser && cOffer && cDate && cStatus) {
-        return { sheet: sheet, headerRow: r + 1, cUser, cOffer, cDate, cStatus };
+        return { sheet: sheet, headerRow: r + 1, cUser, cOffer, cDate, cStatus, cFolder };
       }
     }
   }
@@ -118,16 +130,54 @@ function writeRow_(data) {
     }
   }
 
-  if (targetRow === -1) {
+  const isNewRow = (targetRow === -1);
+  if (isNewRow) {
     targetRow = lastRow + 1; // добавляем новую строку в конец
     sheet.getRange(targetRow, t.cUser).setValue(data.username || '');
   }
 
   sheet.getRange(targetRow, t.cOffer).setValue(data.offer_id || '');
   sheet.getRange(targetRow, t.cDate).setValue(data.listed_date || '');
-  sheet.getRange(targetRow, t.cStatus).setValue(data.status || '');
 
-  return { ok: true, sheet: sheet.getName(), headerRow: t.headerRow, row: targetRow };
+  // Folder — пишем только если такая колонка есть в таблице.
+  if (t.cFolder && data.folder) {
+    sheet.getRange(targetRow, t.cFolder).setValue(data.folder);
+  }
+
+  // Status: для новой строки сохраняем выпадающий список (Active/Sold),
+  // чтобы значение можно было переключать через меню, как в остальных строках.
+  const statusCell = sheet.getRange(targetRow, t.cStatus);
+  if (isNewRow) {
+    ensureStatusDropdown_(sheet, t, targetRow);
+  }
+  statusCell.setValue(data.status || '');
+
+  return {
+    ok: true, sheet: sheet.getName(), headerRow: t.headerRow,
+    row: targetRow, wroteFolder: !!(t.cFolder && data.folder)
+  };
+}
+
+// Ставит на ячейку Status выпадающий список. Сначала пытается скопировать
+// проверку данных из существующей строки (чтобы повторить твою настройку),
+// иначе создаёт список со значениями STATUS_OPTIONS.
+function ensureStatusDropdown_(sheet, t, targetRow) {
+  const firstDataRow = t.headerRow + 1;
+  const existingRows = targetRow - firstDataRow; // строки данных выше новой
+  if (existingRows > 0) {
+    const rules = sheet.getRange(firstDataRow, t.cStatus, existingRows, 1).getDataValidations();
+    for (let i = rules.length - 1; i >= 0; i--) {
+      if (rules[i][0]) {
+        sheet.getRange(targetRow, t.cStatus).setDataValidation(rules[i][0]);
+        return;
+      }
+    }
+  }
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(STATUS_OPTIONS, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(targetRow, t.cStatus).setDataValidation(rule);
 }
 
 function doPost(e) {
@@ -150,7 +200,8 @@ function doGet(e) {
       username: 'TEST',
       offer_id: 'TEST-OFFER',
       listed_date: new Date().toISOString(),
-      status: 'TEST'
+      folder: 'TEST-FOLDER',
+      status: 'Active'
     });
     return json_(result);
   }

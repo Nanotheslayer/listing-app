@@ -6,6 +6,7 @@ pub struct SheetRow {
     pub username: String,
     pub offer_id: String,
     pub listed_date: String,
+    pub folder: String,
     pub status: String,
 }
 
