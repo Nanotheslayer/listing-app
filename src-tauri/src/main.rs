@@ -140,7 +140,7 @@ async fn sync_offer_to_sheet(raw_content: &str, account_name: &str, offer_id: &s
         username,
         offer_id: offer_id.to_string(),
         listed_date: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-        status: "Live".to_string(),
+        status: "Active".to_string(),
     };
 
     match sheets::append_row(&webhook_url, &row).await {

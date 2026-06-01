@@ -37,22 +37,29 @@
 ### Шаг 2. Вставь скрипт
 
 ```javascript
-// Названия колонок в таблице (как в строке заголовков). Регистр не важен.
-const COL_USERNAME = 'Username';
-const COL_OFFER_ID = 'Offer ID';
-const COL_LISTED_DATE = 'Listed Date';
-const COL_STATUS = 'Status';
+// Допустимые названия колонок (как в строке заголовков). Регистр не важен.
+// Можно указать несколько вариантов на колонку — подойдёт любой из них.
+const COL_USERNAME = ['Username'];
+const COL_OFFER_ID = ['Offer ID'];
+const COL_LISTED_DATE = ['Listed Data', 'Listed Date'];
+const COL_STATUS = ['Status'];
 
 // Сколько верхних строк просматривать в поисках строки заголовков.
 const HEADER_SCAN_ROWS = 5;
+
+// Возвращает номер столбца (1-based) для первого подходящего имени, иначе undefined.
+function pickCol_(colIndex, names) {
+  for (const n of names) {
+    const c = colIndex[String(n).trim().toLowerCase()];
+    if (c) return c;
+  }
+  return undefined;
+}
 
 // Находит лист и строку заголовков, где есть все 4 нужные колонки.
 // Перебирает ВСЕ вкладки, чтобы не зависеть от их порядка/имени.
 function findTarget_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const wanted = [COL_USERNAME, COL_OFFER_ID, COL_LISTED_DATE, COL_STATUS]
-    .map(s => s.toLowerCase());
-
   const sheets = ss.getSheets();
   for (let s = 0; s < sheets.length; s++) {
     const sheet = sheets[s];
@@ -67,16 +74,12 @@ function findTarget_() {
         const key = String(h).trim().toLowerCase();
         if (key) colIndex[key] = i + 1; // 1-based
       });
-      const found = wanted.every(w => colIndex[w]);
-      if (found) {
-        return {
-          sheet: sheet,
-          headerRow: r + 1, // 1-based
-          cUser: colIndex[COL_USERNAME.toLowerCase()],
-          cOffer: colIndex[COL_OFFER_ID.toLowerCase()],
-          cDate: colIndex[COL_LISTED_DATE.toLowerCase()],
-          cStatus: colIndex[COL_STATUS.toLowerCase()],
-        };
+      const cUser = pickCol_(colIndex, COL_USERNAME);
+      const cOffer = pickCol_(colIndex, COL_OFFER_ID);
+      const cDate = pickCol_(colIndex, COL_LISTED_DATE);
+      const cStatus = pickCol_(colIndex, COL_STATUS);
+      if (cUser && cOffer && cDate && cStatus) {
+        return { sheet: sheet, headerRow: r + 1, cUser, cOffer, cDate, cStatus };
       }
     }
   }
@@ -89,7 +92,7 @@ function writeRow_(data) {
     return {
       ok: false,
       error: 'Не найдена вкладка со всеми колонками: ' +
-        [COL_USERNAME, COL_OFFER_ID, COL_LISTED_DATE, COL_STATUS].join(', ') +
+        [COL_USERNAME[0], COL_OFFER_ID[0], COL_LISTED_DATE[0], COL_STATUS[0]].join(', ') +
         '. Проверь, что заголовки написаны точно так же (в первых ' +
         HEADER_SCAN_ROWS + ' строках любой вкладки).'
     };
