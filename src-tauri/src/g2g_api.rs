@@ -846,18 +846,21 @@ impl G2GApiClient {
 
     // Вспомогательные функции маппинга
     fn get_server_id(&self, server: &str) -> &str {
+        // Вход приводится к верхнему регистру, поэтому все варианты — заглавными.
+        // Принимаем короткие коды, платформенные коды Riot и полные названия,
+        // чтобы быть не менее терпимыми, чем ценовой путь (map_server_filter).
         match server.to_uppercase().as_str() {
-            "EUNE" => "1a87dd85",
-            "EUW" => "304244a1",
-            "NA" | "NA1" => "e2f2c55b",
-            "BR" | "BR1" => "31e5d298",
-            "LAN" => "302ba1e6",
-            "LAS" => "f28899f5",
-            "OCE" => "5c030fef",
-            "TR" => "2247e703",
-            "RU" => "d94d8d49",
-            "JP" => "e9926686",
-            "KR" => "a7bb0eb5",
+            "EUNE" | "EUNE1" | "EUROPE NORDIC & EAST" | "EUROPE NORDIC EAST" => "1a87dd85",
+            "EUW" | "EUW1" | "EUROPE WEST" => "304244a1",
+            "NA" | "NA1" | "NORTH AMERICA" => "e2f2c55b",
+            "BR" | "BR1" | "BRAZIL" => "31e5d298",
+            "LAN" | "LAN1" | "LA1" | "LATIN AMERICA NORTH" => "302ba1e6",
+            "LAS" | "LAS1" | "LA2" | "LATIN AMERICA SOUTH" => "f28899f5",
+            "OCE" | "OCE1" | "OC1" | "OCEANIA" => "5c030fef",
+            "TR" | "TR1" | "TURKEY" => "2247e703",
+            "RU" | "RU1" | "RUSSIA" => "d94d8d49",
+            "JP" | "JP1" | "JAPAN" => "e9926686",
+            "KR" | "KR1" | "KOREA" => "a7bb0eb5",
             _ => "1a87dd85", // Default EUNE
         }
     }
