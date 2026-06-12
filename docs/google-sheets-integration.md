@@ -192,20 +192,54 @@ function doPost(e) {
   }
 }
 
-// Тест прямо из браузера: открой URL веб-приложения с ?test=1 в адресной строке.
-// В таблицу запишется строка с username "TEST".
-function doGet(e) {
-  if (e && e.parameter && e.parameter.test) {
-    const result = writeRow_({
-      username: 'TEST',
-      offer_id: 'TEST-OFFER',
-      listed_date: new Date().toISOString(),
-      folder: 'TEST-FOLDER',
-      status: 'Active'
-    });
-    return json_(result);
+// Возвращает все строки таблицы (username/status/offer_id) — используется
+// приложением для пометки уже добавленных аккаунтов при загрузке.
+function listRows_() {
+  const t = findTarget_();
+  if (!t) {
+    return { ok: false, error: 'Не найдена вкладка с нужными колонками' };
   }
-  return json_({ ok: true, message: 'Webhook is alive. Add ?test=1 to write a test row.' });
+  const sheet = t.sheet;
+  const lastRow = sheet.getLastRow();
+  const rows = [];
+  if (lastRow > t.headerRow) {
+    const n = lastRow - t.headerRow;
+    const usernames = sheet.getRange(t.headerRow + 1, t.cUser, n, 1).getValues();
+    const statuses = sheet.getRange(t.headerRow + 1, t.cStatus, n, 1).getValues();
+    const offers = sheet.getRange(t.headerRow + 1, t.cOffer, n, 1).getValues();
+    for (let i = 0; i < n; i++) {
+      const username = String(usernames[i][0]).trim();
+      if (!username) continue;
+      rows.push({
+        username: username,
+        status: String(statuses[i][0]).trim(),
+        offer_id: String(offers[i][0]).trim()
+      });
+    }
+  }
+  return { ok: true, rows: rows };
+}
+
+// GET-запросы:
+//   ?list=1 — вернуть все строки таблицы (для сверки аккаунтов приложением);
+//   ?test=1 — записать тестовую строку с username "TEST".
+function doGet(e) {
+  if (e && e.parameter) {
+    if (e.parameter.list) {
+      return json_(listRows_());
+    }
+    if (e.parameter.test) {
+      const result = writeRow_({
+        username: 'TEST',
+        offer_id: 'TEST-OFFER',
+        listed_date: new Date().toISOString(),
+        folder: 'TEST-FOLDER',
+        status: 'Active'
+      });
+      return json_(result);
+    }
+  }
+  return json_({ ok: true, message: 'Webhook is alive. Add ?test=1 to write a test row, ?list=1 to list rows.' });
 }
 
 function json_(obj) {
@@ -266,6 +300,16 @@ function json_(obj) {
 5. **Логика заполнения.** Если в таблице уже есть строка с таким же `Username` и
    **пустым** `Offer ID`, скрипт заполнит именно её, а не добавит новую. Если хочешь
    всегда добавлять новую строку — скажи, уберу этот поиск.
+
+## Сверка аккаунтов при загрузке
+
+При загрузке аккаунтов приложение запрашивает у веб-хука все строки таблицы
+(`GET ?list=1`) и сравнивает логин каждого аккаунта (строка `Login:` из файла
+`{имя папки}.txt`) с колонкой **Username**. Найденные аккаунты помечаются в
+списке бейджем **«📊 В таблице»** с текущим статусом из таблицы (Active/Sold).
+
+Сверка тоже best-effort: если веб-хук не настроен или недоступен, загрузка
+аккаунтов работает как раньше, просто без пометок.
 
 ## Замечания
 

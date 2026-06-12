@@ -161,6 +161,72 @@ async fn sync_offer_to_sheet(
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AccountRef {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SheetCheckResult {
+    pub path: String,
+    pub username: String,
+    pub in_sheet: bool,
+    pub sheet_status: Option<String>,
+    pub offer_id: Option<String>,
+}
+
+// Читает логин аккаунта из файла {name}.txt в папке аккаунта.
+// Если файла или строки "Login:" нет — fallback на имя папки (как при выставлении).
+fn read_account_login(account: &AccountRef) -> String {
+    let file_path = PathBuf::from(&account.path).join(format!("{}.txt", account.name));
+    if let Ok(content) = fs::read_to_string(&file_path) {
+        if let Some(login) = extract_login(&content) {
+            return login;
+        }
+    }
+    account.name.clone()
+}
+
+// Проверяет по логину, какие из загруженных аккаунтов уже есть в Google-таблице.
+#[tauri::command]
+async fn check_accounts_in_sheet(accounts: Vec<AccountRef>) -> Result<Vec<SheetCheckResult>, String> {
+    let webhook_url = load_sheets_webhook()
+        .ok_or_else(|| "Google Sheets webhook не настроен".to_string())?;
+
+    let rows = sheets::fetch_rows(&webhook_url).await?;
+
+    // Карта "username (lowercase) -> (status, offer_id)" из таблицы.
+    let mut by_username: std::collections::HashMap<String, (Option<String>, Option<String>)> =
+        std::collections::HashMap::new();
+    for row in rows {
+        let key = row.username.trim().to_lowercase();
+        if !key.is_empty() {
+            by_username.insert(key, (row.status, row.offer_id));
+        }
+    }
+
+    let results = accounts
+        .iter()
+        .map(|account| {
+            let username = read_account_login(account);
+            let found = by_username.get(&username.trim().to_lowercase());
+            SheetCheckResult {
+                path: account.path.clone(),
+                username,
+                in_sheet: found.is_some(),
+                sheet_status: found.and_then(|(s, _)| s.clone()),
+                offer_id: found.and_then(|(_, o)| o.clone()),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let found_count = results.iter().filter(|r| r.in_sheet).count();
+    println!("📊 Sheet check: {} of {} accounts found in sheet", found_count, results.len());
+
+    Ok(results)
+}
+
 fn save_offer_id_to_file(account_path: &str, offer_id: &str) -> Result<(), String> {
     println!("💾 Saving offer_id to file...");
 
@@ -1124,6 +1190,7 @@ fn main() {
             open_account_screenshot,
             create_g2g_offer,
             create_listing,
+            check_accounts_in_sheet,
             load_settings,
             save_settings,
             clear_settings,

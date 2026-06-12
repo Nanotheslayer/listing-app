@@ -21,6 +21,17 @@ export interface Account {
   status: "loaded" | "processing" | "listed" | "error";
   files?: string[];
   is_listed?: boolean;
+  in_sheet?: boolean;
+  sheet_status?: string;
+  sheet_username?: string;
+}
+
+export interface SheetCheckResult {
+  path: string;
+  username: string;
+  in_sheet: boolean;
+  sheet_status: string | null;
+  offer_id: string | null;
 }
 
 export interface LoadAccountsResult {
@@ -175,6 +186,29 @@ export class AccountManager {
       console.error(`Ошибка получения файлов для аккаунта ${account.name}:`, error);
       throw error;
     }
+  }
+
+  // Проверить по логину, какие аккаунты уже есть в Google-таблице.
+  // Возвращает количество найденных. Бросает ошибку, если веб-хук не настроен.
+  async checkAccountsInSheet(): Promise<number> {
+    if (this.accounts.length === 0) return 0;
+
+    const results = await invoke<SheetCheckResult[]>("check_accounts_in_sheet", {
+      accounts: this.accounts.map((a) => ({ name: a.name, path: a.path })),
+    });
+
+    let found = 0;
+    for (const result of results) {
+      const account = this.accounts.find((a) => a.path === result.path);
+      if (!account) continue;
+      account.in_sheet = result.in_sheet;
+      account.sheet_status = result.sheet_status ?? undefined;
+      account.sheet_username = result.username;
+      if (result.in_sheet) found++;
+    }
+
+    console.log(`📊 В таблице найдено ${found} из ${results.length} аккаунтов`);
+    return found;
   }
 
   // Получить все аккаунты
