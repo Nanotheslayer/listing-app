@@ -9,6 +9,7 @@
   let messageType = $state<"success" | "error" | "info">("info");
   let accounts = $state<Account[]>([]);
   let lastPath = $state("");
+  let checkingSheet = $state(false);
 
   // Загружаем и обновляем аккаунты при изменении страницы
   $effect(() => {
@@ -32,6 +33,21 @@
         lastPath = accountManager.getLastSelectedPath(); // Обновляем отображаемый путь
         statusMessage = result.message;
         messageType = "success";
+
+        // Проверяем по логину, какие аккаунты уже есть в Google-таблице.
+        // Не критично: если веб-хук не настроен или недоступен — просто пропускаем.
+        checkingSheet = true;
+        try {
+          const found = await accountManager.checkAccountsInSheet();
+          accounts = accountManager.getAccounts();
+          if (found > 0) {
+            statusMessage = `${result.message} • В таблице найдено: ${found}`;
+          }
+        } catch (sheetError) {
+          console.warn("Проверка по Google-таблице пропущена:", sheetError);
+        } finally {
+          checkingSheet = false;
+        }
       } else {
         statusMessage = result.message;
         messageType = "error";
@@ -186,6 +202,15 @@
           <div class="flex items-center gap-3">
             <span class="text-2xl">📋</span>
             <h2 class="text-2xl font-bold text-white">Загруженные аккаунты</h2>
+            {#if checkingSheet}
+              <span class="text-gray-400 text-sm flex items-center gap-2">
+                <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Сверка с таблицей...</span>
+              </span>
+            {/if}
             <span class="ml-auto bg-purple-500/20 text-purple-400 px-3 py-1 rounded-lg text-sm font-semibold">
               {accounts.length} {accounts.length === 1 ? 'аккаунт' : accounts.length < 5 ? 'аккаунта' : 'аккаунтов'}
             </span>
@@ -223,6 +248,15 @@
                           <span class="inline-flex items-center gap-1 px-2 py-1 bg-green-500/20 text-green-400 rounded text-xs font-semibold">
                             <span>🏷️</span>
                             <span>В продаже</span>
+                          </span>
+                        {/if}
+                        {#if account.in_sheet}
+                          <span
+                            class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold {account.sheet_status?.toLowerCase() === 'sold' ? 'bg-orange-500/20 text-orange-400' : 'bg-purple-500/20 text-purple-400'}"
+                            title="Логин {account.sheet_username} найден в Google-таблице{account.sheet_status ? ` со статусом ${account.sheet_status}` : ''}"
+                          >
+                            <span>📊</span>
+                            <span>В таблице{account.sheet_status ? `: ${account.sheet_status}` : ''}</span>
                           </span>
                         {/if}
                       </div>
