@@ -46,7 +46,10 @@ jobs:
           version: 8
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        # Pinned to a known-good stable. Floating `@stable` previously pulled a
+        # newer compiler that fails to build `tauri-utils`/`time` with a spurious
+        # `From<HourBase>` coherence error. Bump this deliberately when needed.
+        uses: dtolnay/rust-toolchain@1.94.1
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
