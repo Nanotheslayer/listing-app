@@ -58,8 +58,9 @@ pub struct SheetEntry {
 #[derive(Debug, Deserialize)]
 struct ListResponse {
     ok: bool,
-    #[serde(default)]
-    rows: Vec<SheetEntry>,
+    // Option, а не default: старый скрипт отвечает {"ok":true,"message":...}
+    // на любой GET, и default превратил бы это в "0 строк" без ошибки.
+    rows: Option<Vec<SheetEntry>>,
     #[serde(default)]
     error: Option<String>,
 }
@@ -101,6 +102,12 @@ pub async fn fetch_rows(webhook_url: &str) -> Result<Vec<SheetEntry>, String> {
         return Err(parsed.error.unwrap_or_else(|| "Webhook returned ok=false".to_string()));
     }
 
-    println!("✅ Fetched {} rows from sheet", parsed.rows.len());
-    Ok(parsed.rows)
+    let rows = parsed.rows.ok_or_else(|| {
+        "Веб-хук ответил без поля 'rows' — похоже, в Apps Script задеплоена старая версия \
+         скрипта без поддержки ?list=1. Обнови код скрипта и сделай Deploy → New version."
+            .to_string()
+    })?;
+
+    println!("✅ Fetched {} rows from sheet", rows.len());
+    Ok(rows)
 }

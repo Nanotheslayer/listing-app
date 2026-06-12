@@ -35,16 +35,17 @@
         messageType = "success";
 
         // Проверяем по логину, какие аккаунты уже есть в Google-таблице.
-        // Не критично: если веб-хук не настроен или недоступен — просто пропускаем.
+        // Загрузке это не мешает, но причину неудачи показываем в интерфейсе.
         checkingSheet = true;
         try {
           const found = await accountManager.checkAccountsInSheet();
           accounts = accountManager.getAccounts();
-          if (found > 0) {
-            statusMessage = `${result.message} • В таблице найдено: ${found}`;
-          }
+          statusMessage = `${result.message} • В таблице найдено: ${found}`;
         } catch (sheetError) {
-          console.warn("Проверка по Google-таблице пропущена:", sheetError);
+          console.warn("Проверка по Google-таблице не удалась:", sheetError);
+          const reason = sheetError instanceof Error ? sheetError.message : String(sheetError);
+          statusMessage = `${result.message} • Сверка с таблицей не удалась: ${reason}`;
+          messageType = "info";
         } finally {
           checkingSheet = false;
         }
