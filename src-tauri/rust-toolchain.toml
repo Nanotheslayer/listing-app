@@ -1,0 +1,6 @@
+# Pin the Rust toolchain so local and CI builds use the same known-good
+# compiler. A floating "stable" pulled a newer rustc that fails to build
+# tauri-utils/time with a spurious `From<HourBase>` coherence error.
+# Bump this deliberately after verifying a build succeeds.
+[toolchain]
+channel = "1.94.1"

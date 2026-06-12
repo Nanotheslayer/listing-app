@@ -67,7 +67,9 @@ dist-ssr/
 
 # Rust / Cargo
 src-tauri/target/
-src-tauri/Cargo.lock
+# Cargo.lock is committed on purpose: it pins exact dependency versions
+# (e.g. `time`) so CI builds are reproducible and don't break on a newer
+# floating release. Do NOT re-ignore it.
 
 # Tauri
 src-tauri/gen/
