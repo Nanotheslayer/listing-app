@@ -153,8 +153,12 @@ function writeRow_(data) {
   statusCell.setValue(data.status || '');
 
   return {
-    ok: true, sheet: sheet.getName(), headerRow: t.headerRow,
-    row: targetRow, wroteFolder: !!(t.cFolder && data.folder)
+    ok: true, sheet: sheet.getName(), headerRow: t.headerRow, row: targetRow,
+    // Диагностика записи Folder: видно, дошло ли значение и нашлась ли колонка.
+    wroteFolder: !!(t.cFolder && data.folder),
+    receivedFolder: data.folder || null,
+    folderColumnFound: !!t.cFolder,
+    scriptVersion: 4
   };
 }
 
@@ -239,7 +243,7 @@ function doGet(e) {
       return json_(result);
     }
   }
-  return json_({ ok: true, message: 'Webhook is alive. Add ?test=1 to write a test row, ?list=1 to list rows.' });
+  return json_({ ok: true, message: 'Webhook is alive. Add ?test=1 to write a test row, ?list=1 to list rows.', scriptVersion: 4 });
 }
 
 function json_(obj) {
@@ -300,6 +304,28 @@ function json_(obj) {
 5. **Логика заполнения.** Если в таблице уже есть строка с таким же `Username` и
    **пустым** `Offer ID`, скрипт заполнит именно её, а не добавит новую. Если хочешь
    всегда добавлять новую строку — скажи, уберу этот поиск.
+
+## Диагностика: «Folder не заполняется»
+
+Folder проходит через два звена, и сломаться может любое из них. Ответ скрипта
+теперь содержит диагностические поля — по ним видно, где обрыв:
+
+| Поле в ответе | Значение | Что значит |
+|---|---|---|
+| `scriptVersion` | `4` | Задеплоена актуальная версия скрипта. Меньше или нет поля — скрипт старый, обнови код и сделай **New version** |
+| `receivedFolder` | `null` | Приложение **не прислало** folder → приложение собрано из старого кода, пересобери его из свежего `main` |
+| `folderColumnFound` | `false` | Скрипт не нашёл колонку `Folder` в строке заголовков → проверь её название |
+| `wroteFolder` | `true` | Всё сработало, значение записано |
+
+Как проверить:
+1. Открой `.../exec` (без параметров) — в ответе должно быть `"scriptVersion":4`.
+   Если нет — у тебя задеплоена старая версия скрипта.
+2. Открой `.../exec?test=1` — в ответе смотри `wroteFolder`/`folderColumnFound`,
+   а в таблице у строки `TEST` должна заполниться колонка Folder значением
+   `TEST-FOLDER`.
+3. Если тест пишет Folder, а реальное выставление — нет, смотри лог Executions
+   у `doPost`: там будет `receivedFolder`. Если `null` — твоя сборка приложения
+   старее этой функции, нужно пересобрать приложение.
 
 ## Сверка аккаунтов при загрузке
 
