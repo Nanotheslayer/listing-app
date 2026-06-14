@@ -246,6 +246,7 @@ impl G2GApiClient {
                 "RU" | "Russia" => "319340f0:65ec9642%7Ce80c30d1:d94d8d49",
                 "JP" | "Japan" => "e80c30d1:e9926686%7C319340f0:65ec9642",
                 "KR" | "Korea" => "319340f0:65ec9642%7Ce80c30d1:a7bb0eb5",
+                "SEA" | "SG2" | "Singapore" | "Southeast Asia" => "e80c30d1:67d20e31%7C319340f0:65ec9642",
                 _ => "e80c30d1:1a87dd85%7C319340f0:65ec9642", // Default to EUNE
             };
 
@@ -861,6 +862,7 @@ impl G2GApiClient {
             "RU" | "RU1" | "RUSSIA" => "d94d8d49",
             "JP" | "JP1" | "JAPAN" => "e9926686",
             "KR" | "KR1" | "KOREA" => "a7bb0eb5",
+            "SEA" | "SG2" | "SINGAPORE" | "SOUTHEAST ASIA" => "67d20e31",
             _ => "1a87dd85", // Default EUNE
         }
     }
@@ -1014,6 +1016,7 @@ fn map_server_filter(server: &str) -> &'static str {
         "RU" | "Russia" => "319340f0:65ec9642%7Ce80c30d1:d94d8d49",
         "JP" | "Japan" => "e80c30d1:e9926686%7C319340f0:65ec9642",
         "KR" | "Korea" => "319340f0:65ec9642%7Ce80c30d1:a7bb0eb5",
+        "SEA" | "SG2" | "Singapore" | "Southeast Asia" => "e80c30d1:67d20e31%7C319340f0:65ec9642",
         _ => "e80c30d1:1a87dd85%7C319340f0:65ec9642",
     }
 }

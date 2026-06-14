@@ -130,6 +130,10 @@ function normalizeServer(server: string): string {
     "japan": "JP",
     "kr": "KR",
     "korea": "KR",
+    "sea": "SEA",
+    "sg2": "SEA",
+    "singapore": "SEA",
+    "southeast asia": "SEA",
   };
 
   const normalized = server.toLowerCase().trim();
